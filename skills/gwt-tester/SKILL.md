@@ -27,11 +27,13 @@ When this skill says:
 
 ## Rules
 1. Keep maximum nesting depth to 3 levels: `suite -> suite -> case`.
-   Exception: allow one additional nested level for `Then` variants when validating the same outcome across interfaces or variants (for example `via RPC` and `via REST`).
+   Exception: allow `suite -> suite -> suite -> case` for `When` variant coverage when validating the same behavior across interfaces or variants (for example `via RPC` and `via REST`).
+   In this exception, variants are at level 3 and `Then` case blocks are at level 4.
 2. Never nest `Given` blocks inside another `Given` block.
 3. Keep `Given` setup hooks focused on shared context and test data, not primary behavior under test.
 4. Prefer assertion-only case blocks.
 5. Move executable behavior into a dedicated `When` block whenever possible. Use setup hooks inside that `When` block to run the action once per case.
+   If that `When` contains variants, place action setup hooks inside each variant block, not in the parent `When` block.
 6. Ensure block titles describe behavior that actually happens in that block's scope. Do not title a case `When <action> ...` if `<action>` already ran in another block's setup hook.
 7. If a `When` has only one `Then`, use a single case title (`When ... then ...`); in this collapsed form, putting the `When` action inside the case body is acceptable.
 8. Remove wrapper suite blocks that do not add scenario context.
@@ -47,12 +49,81 @@ When this skill says:
 2. Add `Given` setup hooks for shared context only.
 3. Add nested `When ...` suite blocks for each action path.
 4. Run the action in setup hooks inside the `When` block when multiple `Then` cases share it.
+   If variants exist under that `When`, run setup hooks inside each variant block.
 5. Add assertion-only `Then ...` case blocks.
 6. If a `When` has only one `Then`, optionally collapse to a single case title: `When ... then ...`.
 7. Move logic from `Given` hooks into `When` hooks when that logic is action-specific.
-8. If a `Then` needs interface/variant coverage, nest variant blocks under that `Then` only (for example `via RPC`, `via REST`).
+8. If a `When` needs interface/variant coverage, nest variant blocks under that `When` only (for example `via RPC`, `via REST`).
 9. Keep nesting shallow and remove redundant wrappers.
 10. Run tests and formatter.
+
+## When Variant Coverage
+Use one extra nesting level only for variant coverage under the same `When` action.
+Keep action setup hooks inside each variant block, not in the parent `When` block.
+
+Example 1 (setup inside variants):
+
+```pseudo
+suite("Given an endpoint that returns a user", () => {
+  suite("When requesting user 42", () => {
+    suite("via RPC", () => {
+      setup_each(() => {
+        response = requestUserViaRpc(42)
+      })
+
+      case("Then status is successful", () => {
+        assert(response.status == 200)
+      })
+    })
+
+    suite("via REST", () => {
+      setup_each(() => {
+        response = requestUserViaRest(42)
+      })
+
+      case("Then status is successful", () => {
+        assert(response.status == 200)
+      })
+    })
+  })
+})
+```
+
+Example 2 (multiple `Then` outcomes per variant):
+
+```pseudo
+suite("Given a user endpoint", () => {
+  suite("When requesting user 42", () => {
+    suite("via RPC", () => {
+      setup_each(() => {
+        response = requestUserViaRpc(42)
+      })
+
+      case("Then status is successful", () => {
+        assert(response.status == 200)
+      })
+
+      case("Then user payload is present", () => {
+        assert(response.body.user != null)
+      })
+    })
+
+    suite("via REST", () => {
+      setup_each(() => {
+        response = requestUserViaRest(42)
+      })
+
+      case("Then status is successful", () => {
+        assert(response.status == 200)
+      })
+
+      case("Then user payload is present", () => {
+        assert(response.body.user != null)
+      })
+    })
+  })
+})
+```
 
 ## Pseudocode Pattern
 ```pseudo
@@ -231,25 +302,6 @@ suite("Given a user lookup", () => {
 })
 ```
 
-## Then Variant Nesting Exception
-Use one extra nesting level only for variant coverage of the same `Then` outcome.
-
-```pseudo
-suite("Given an endpoint that returns a user", () => {
-  suite("When requesting user 42", () => {
-    suite("Then status is successful", () => {
-      case("via RPC", () => {
-        // assert only
-      })
-
-      case("via REST", () => {
-        // assert only
-      })
-    })
-  })
-})
-```
-
 ## Refactoring Guide
 When asked to refactor or check existing tests, evaluate against all rules, not only the rule that triggered the edit.
 
@@ -269,7 +321,8 @@ Use this pass order:
 - Calling the SUT inside a case block when it can be executed in `When` setup hooks.
 - Mixing setup/action/asserts in a single case block.
 - Adding wrapper suite blocks with no new context.
-- Depth greater than `suite -> suite -> case`, except one additional level for `Then` variants.
+- Collapsing to `When ... then ...` when `When` variants exist, even if there is only one `Then` outcome.
+- Depth greater than `suite -> suite -> case`, except `suite -> suite -> suite -> case` for `When` variants.
 - A title that claims an action runs in one block when it actually runs in another block.
 
 ## Review Checklist
@@ -278,10 +331,11 @@ Use this pass order:
 - Does each case block contain assertions only?
 - Does `Given` setup contain only shared context?
 - Is action logic moved into the relevant `When` block?
+- When variants exist, are action setup hooks placed inside each variant block instead of the parent `When` block?
 - After each logic move, was `When`/`Then` collapse re-evaluated?
 - Do suite and case titles match what actually happens in each block's scope?
 - Are single `When` + single `Then` cases collapsed into one case block?
 - Are file-specific utilities placed at the bottom of the test file (with tests first)?
 - Are shared utilities moved to shared locations that follow existing codebase patterns (or a new appropriate `utils` directory when no pattern exists)?
 - Are values extracted into named variables only when reused more than once, and placed in the nearest shared scope (for example `Given` or `When`)?
-- Is nesting depth <= 3, or <= 4 only when the 4th level is `Then` variants (for example `via RPC`/`via REST`)?
+- Is nesting depth <= 3, or `suite -> suite -> suite -> case` only for `When` variants (level 3) with `Then` case blocks at level 4 (for example `via RPC`/`via REST`)?
