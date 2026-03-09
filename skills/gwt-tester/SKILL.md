@@ -33,11 +33,12 @@ When this skill says:
 3. Keep `Given` setup hooks focused on shared context and test data, not primary behavior under test.
 4. Prefer assertion-only case blocks.
 5. Move executable behavior into a dedicated `When` block whenever possible. Use setup hooks inside that `When` block to run the action once per case.
+   If there is no executable action to perform for a scenario, skip the `When` block and place `Then` cases directly under the `Given` block.
    If that `When` contains variants, place action setup hooks inside each variant block, not in the parent `When` block.
 6. Ensure block titles describe behavior that actually happens in that block's scope. Do not title a case `When <action> ...` if `<action>` already ran in another block's setup hook.
 7. If a `When` has only one `Then`, use a single case title (`When ... then ...`); in this collapsed form, putting the `When` action inside the case body is acceptable.
 8. Remove wrapper suite blocks that do not add scenario context.
-9. Write explicit scenario titles: `Given <subject> with <condition>`, `When <action>`, and `Then <outcome>`.
+9. Write explicit scenario titles: `Given <subject> with <condition>`, optional `When <action>`, and `Then <outcome>`.
 10. Place test utilities based on scope:
     - If a utility is specific to one test file, place it at the bottom of that file so test blocks remain the first code in the file.
     - If a utility is reused across test files, move it to shared test utilities following existing codebase conventions.
@@ -48,6 +49,7 @@ When this skill says:
 1. Define scenarios as top-level `Given ...` suite blocks.
 2. Add `Given` setup hooks for shared context only.
 3. Add nested `When ...` suite blocks for each action path.
+   If there is no action to perform, skip `When` and place `Then` cases directly under `Given`.
 4. Run the action in setup hooks inside the `When` block when multiple `Then` cases share it.
    If variants exist under that `When`, run setup hooks inside each variant block.
 5. Add assertion-only `Then ...` case blocks.
@@ -144,6 +146,20 @@ suite("Given <subject> with <state>", () => {
     case("Then <outcome B>", () => {
       // assert only
     })
+  })
+})
+```
+
+No-action scenario (skip `When`):
+
+```pseudo
+suite("Given <subject> with <state>", () => {
+  setup_each(() => {
+    // arrange shared context only
+  })
+
+  case("Then <outcome A>", () => {
+    // assert only
   })
 })
 ```
@@ -309,6 +325,7 @@ Use this pass order:
 
 1. Map current structure as `Given`, `When`, and `Then` blocks.
 2. Move action-specific logic out of `Given` setup hooks into the correct `When` block.
+   Keep scenarios with no action directly under `Given` without adding an empty `When`.
 3. After each logic move, immediately re-evaluate collapse opportunities:
    - If a `When` block now has only one `Then`, collapse to `When ... then ...`.
    - If additional outcomes still exist, keep `When` + multiple `Then` cases.
@@ -321,6 +338,7 @@ Use this pass order:
 - Calling the SUT inside a case block when it can be executed in `When` setup hooks.
 - Mixing setup/action/asserts in a single case block.
 - Adding wrapper suite blocks with no new context.
+- Adding an empty `When` block when there is no action to perform.
 - Collapsing to `When ... then ...` when `When` variants exist, even if there is only one `Then` outcome.
 - Depth greater than `suite -> suite -> case`, except `suite -> suite -> suite -> case` for `When` variants.
 - A title that claims an action runs in one block when it actually runs in another block.
@@ -331,6 +349,7 @@ Use this pass order:
 - Does each case block contain assertions only?
 - Does `Given` setup contain only shared context?
 - Is action logic moved into the relevant `When` block?
+- If there is no action to perform, is `When` skipped and are `Then` cases placed directly under `Given`?
 - When variants exist, are action setup hooks placed inside each variant block instead of the parent `When` block?
 - After each logic move, was `When`/`Then` collapse re-evaluated?
 - Do suite and case titles match what actually happens in each block's scope?
