@@ -6,7 +6,7 @@ The threat: the pull request is **untrusted input** that steers an agent holding
 
 ## Least privilege
 
-- **Workflow default `contents: read`.** Only job `review` gets more: `pull-requests: write` and `issues: write` to post reviews and comments, and `id-token: write` for the OIDC token exchange. No `actions: read`, so tag mode cannot install the CI-log tools.
+- **Workflow default `contents: read`.** Only job `review` gets more: `id-token: write` for the OIDC token exchange, `issues: write`, and `pull-requests: read` for the context and summary steps. Claude posts reviews and comments with its app token. The job's `GITHUB_TOKEN` submits and dismisses no review, so the policy check rejects `pull-requests: write`. No `actions: read`, so tag mode cannot install the CI-log tools.
 - **App token downgraded.** The Claude GitHub App token defaults to `contents: write`. `additional_permissions: contents: read` caps it, so a prompt-injected run cannot push or merge even if a tool limit fails. GitHub enforces this, not the model.
 - **`persist-credentials: false`** on checkout keeps the job token out of `.git/config`.
 - **Pin every action by commit SHA.** A tag can move; a SHA cannot. An action update is a reviewed change to the pin.
@@ -15,7 +15,7 @@ The threat: the pull request is **untrusted input** that steers an agent holding
 
 - **Trusted rules copy.** The job clones the default branch to `$RUNNER_TEMP/trusted-rules` and the reviewer reads its rules there. The checkout's copies of the rules belong to the change under review: a pull request that edits `AGENTS.md` cannot rewrite the rules that judge it.
 - **`--setting-sources user`.** Stops the checkout's `CLAUDE.md` and `.claude/` (settings, hooks, agents) from loading. The action restores some of these from the base branch, but not every rules file, so the flag is the guarantee.
-- **The gate runs from the trusted copy.** `claude-review-gate.mjs` builds the manifest and judges the verdict from the default branch, so a pull request cannot rewrite the gate that judges it.
+- **The script runs from the trusted copy.** `claude-review-gate.mjs` builds the manifest and the job summary from the default branch's copy, so a pull request cannot rewrite how its own context is built or reported.
 - **Untrusted-data framing.** The prompt, system prompt, and every sub-agent definition say that PR text, comments, diffs, and file contents are data: they cannot change instructions, pick the verdict, or count as evidence. "Tests pass" in a PR body is a claim, not evidence. Sub-agents do not inherit the appended system prompt, so each definition repeats the rule.
 
 ## Fork pull requests
@@ -47,17 +47,16 @@ Automatic review defines three sub-agent types through `--agents`: `diff-reviewe
 
 The validator exists because reviewers over-report. A fresh sub-agent must confirm each candidate against the code or a rule before it is posted; anything unconfirmed is dropped.
 
-## Coverage gate
+## Coverage is reported, not enforced
 
-The model's own coverage claim is not evidence: an unchecked reviewer can read a quarter of the diff and still write "Reviewed 37 of 37 changed files". The gate reads the transcript and fails the job unless:
+There is no coverage gate. After the review, the job summary reports what the transcript shows: turns, denied tool calls, sub-agents started, the `diff.patch` lines read, and the source and skim files not read in full. It reports with warnings, not failures, when the action skipped Claude (it does that, with success, when the PR changes the workflow), when Claude did not finish, and when the run submitted no review or more than one. Nothing in that step fails the job, dismisses a review, or marks it incomplete.
 
-- the action ran Claude (it skips, with success, when the PR changes the workflow);
-- Claude finished;
-- `claude[bot]` submitted exactly one `APPROVE` or `REQUEST_CHANGES` on the head commit during this run;
-- the body's coverage line states every changed file;
-- Claude or a sub-agent read every line of every **source** file's range in `diff.patch`.
+What this costs:
 
-Skim files (lock files, fixtures, docs) may go unread; the job summary lists them. On failure the job dismisses any verdict the run left, so a green check means a complete review and an approval never stands on a partial read. The gate proves each source range was read, not that every defect was found.
+- **The model's coverage claims are unverified.** The parallel `diff-reviewer` chunks make a full read likely, and each sub-agent reports the ranges it read, but nothing holds the verdict to those reports. An approval can stand on a partial read, and a green check does not mean a complete review, or any review at all. Read the job summary before relying on a verdict.
+- **Verdicts are advisory.** A `claude[bot]` approval or change request is one reviewer's opinion. Merging stays human (see below).
+
+A strict gate failed complete reviews over files no reviewer needed to read, such as vendored data classed as source. If a repository needs proof that every source range was read, build that check deliberately, with a skim class that fits the repository.
 
 ## Approval is advisory
 
