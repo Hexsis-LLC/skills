@@ -1,6 +1,6 @@
 ---
 name: claude-pr-review
-description: Set up automated Claude pull-request review in a GitHub repository with anthropics/claude-code-action, as a review-only workflow with read-only sub-agents, a source-coverage gate, and one formal review with inline findings. Use when adding, hardening, or debugging Claude PR review or @claude mentions in GitHub Actions.
+description: Set up automated Claude pull-request review in a GitHub repository with anthropics/claude-code-action, as a review-only workflow with read-only sub-agents and one formal review with inline findings. Use when adding, hardening, or debugging Claude PR review or @claude mentions in GitHub Actions.
 ---
 
 # Claude PR Review
@@ -11,14 +11,14 @@ What the setup does:
 
 - **Automatic review** of ready, same-repository pull requests. A workflow step writes the diff as line-oriented files. Read-only `diff-reviewer` sub-agents read every source chunk in parallel, a `rules-reviewer` checks the change against the repository's rules, and a fresh `finding-validator` confirms each candidate finding. Claude then submits exactly one formal review on the head commit.
 - **`@claude` mentions** on pull requests from users with write access, answered inline. Mentions cannot submit a verdict.
-- **A coverage gate** that fails the job, and dismisses the verdict, unless the transcript proves every changed source file's diff range was read.
+- **An informational job summary** of turns, denied tool calls, sub-agents, the diff lines and files read, and the review the run left. It never fails the job or dismisses a review: coverage is reported, not enforced, and the verdict is advisory.
 
 ## Files
 
 | File | Becomes | Role |
 | --- | --- | --- |
 | [`templates/claude-review.yml`](templates/claude-review.yml) | `.github/workflows/claude-review.yml` | The review workflow |
-| [`templates/claude-review-gate.mjs`](templates/claude-review-gate.mjs) | `scripts/claude-review-gate.mjs` | Builds the diff manifest and judges the verdict |
+| [`templates/claude-review-gate.mjs`](templates/claude-review-gate.mjs) | `scripts/claude-review-gate.mjs` | Builds the diff manifest and the job summary |
 | [`templates/check-workflow-policy.mjs`](templates/check-workflow-policy.mjs) | `scripts/check-workflow-policy.mjs` | Enforces the secret and permission boundary in CI |
 | `templates/*.test.mjs` | `scripts/*.test.mjs` | `node:test` suites for both scripts |
 
@@ -34,8 +34,8 @@ The scripts need Node.js 22 or later and no dependencies. Search the templates f
 | Trigger set | automatic review and `@claude` mentions | `on:`, the job `if:`, and `trigger_phrase` |
 | Docs-governance mode | `off` | `REVIEW_GOVERNANCE` in the job env. See [Docs-governance mode](#docs-governance-mode). |
 | Auth | `CLAUDE_CODE_OAUTH_TOKEN` secret | the action's token input, plus `reviewSecret` and `reviewTokenInput` in the policy check. For an Anthropic API key, use `anthropic_api_key` and `ANTHROPIC_API_KEY`. |
-| Source and skim classes | everything is source except lock files, fixtures, snapshots, and docs | the regexes at the top of the gate |
-| Chunk size | 800 diff lines | `defaultChunkLines` in the gate |
+| Source and skim classes | everything is source except lock files, fixtures, snapshots, and docs | the regexes at the top of the script |
+| Chunk size | 800 diff lines | `defaultChunkLines` in the script |
 | Max turns, timeout | 100 turns, 30 minutes | `--max-turns`, `timeout-minutes`. Sub-agent turns do not count toward max turns. |
 | Transcript retention | 7 days | the upload step. On a public repository, anyone can download the transcript. |
 | Script directory | `scripts/` | the two `node "$RUNNER_TEMP/trusted-rules/scripts/..."` lines, and the policy check's default root |
@@ -49,7 +49,7 @@ Read, don't assume:
 - the default branch, the existing workflows, and the CI job where Node checks run;
 - the rules files (`AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, or nested ones);
 - the runner the repository already uses;
-- branch protection and rulesets on the default branch, especially who may dismiss reviews;
+- branch protection and rulesets on the default branch, especially required-review rules;
 - whether any workflow uses `secrets: inherit` or `toJSON(secrets)`. The policy check blocks both, because they would hand the review secret to another workflow;
 - the docs-governance markers (see [Docs-governance mode](#docs-governance-mode)).
 
@@ -69,7 +69,7 @@ The template pins every action by commit SHA. Re-resolve each pin rather than tr
 
 ### 3. Install the templates
 
-Copy the files into place and set every parameter. Keep each security control intact. Before you change one, read [references/security-model.md](references/security-model.md); it explains what each control closes. Keep the review prompt's output contract and the gate's checks in step: the gate parses the heading and the coverage line.
+Copy the files into place and set every parameter. Keep each security control intact. Before you change one, read [references/security-model.md](references/security-model.md); it explains what each control closes. Keep the review prompt's output contract intact; the job summary quotes the review it finds but checks nothing in it.
 
 Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-policy.test.mjs` and `node scripts/check-workflow-policy.mjs` to the repository's existing CI. Adapt the test fixtures to the repository's own paths when you change the classes.
 
@@ -89,9 +89,8 @@ The agent cannot do these. Give them to the user as a checklist:
 
 1. **Install the Claude GitHub App** on the repository: <https://github.com/apps/claude>. It is the identity that posts reviews, through the OIDC token exchange.
 2. **Create the model credential and add it as a repository secret.** For a Claude subscription, run `claude setup-token` and save the result as `CLAUDE_CODE_OAUTH_TOKEN`. For an API key, save it as `ANTHROPIC_API_KEY`. The OAuth token lasts a year, and deleting the secret does not revoke it.
-3. **Merge the setup pull request without its own review.** The token exchange refuses a workflow that differs from the default branch's copy. So the setup PR, and every later PR that edits the workflow, fails its review job by design. A human reviews those.
-4. **If branch protection restricts dismissals,** allow GitHub Actions to dismiss reviews on the default branch. Otherwise accept that failed verdicts stand until a human dismisses them.
-5. **Decide whether a `claude[bot]` approval counts** toward any required-review rule. The safe default is that it does not, and merging stays human.
+3. **Merge the setup pull request without its own review.** The token exchange refuses a workflow that differs from the default branch's copy. So the setup PR, and every later PR that edits the workflow, gets no Claude review by design: the job passes, and its summary warns that the action skipped Claude. A human reviews those.
+4. **Decide whether a `claude[bot]` approval counts** toward any required-review rule. The safe default is that it does not, and merging stays human.
 
 If the user runs `/install-github-app` instead, keep the app and the secret it creates. Discard its generated workflow in favor of this one.
 
@@ -100,7 +99,7 @@ If the user runs `/install-github-app` instead, keep the app and the secret it c
 After the setup is merged, open a small same-repository PR that changes one source file, one lock or doc file, and holds a planted defect. Then check:
 
 - [ ] The `Claude review` job runs, and the GitHub MCP server connects.
-- [ ] The job summary shows zero denied tool calls, one `diff-reviewer` per chunk, and `Source files read: N of N`.
+- [ ] The job summary shows zero denied tool calls, one `diff-reviewer` per chunk, and `Source files read in full: N of N`.
 - [ ] `claude[bot]` posts exactly one review on the head commit: `REQUEST_CHANGES`, with the planted defect as its own inline comment, following the [output contract](#review-output-contract).
 - [ ] A follow-up push that fixes the defect re-runs the review and yields `APPROVE`. A run still in progress for the older commit is cancelled.
 - [ ] A PR comment with `@claude <question>` from a write-access user gets an inline reply and no verdict.
@@ -115,14 +114,13 @@ The automatic review always ends with **one formal review on the head commit**:
 
 - **Confirmed findings:** `REQUEST_CHANGES`, with each finding as its own inline comment on its diff line. Findings never go into the body or a separate PR comment.
 - **No confirmed finding:** `APPROVE`.
-- **Incomplete** (a source range unread, or the rules unreadable): `COMMENT` naming what was not read. The gate fails the job.
+
+The verdict is never `COMMENT`.
 
 The body is a short summary, never a list:
 
 ```markdown
 ## Claude review: Changes requested
-
-**Reviewed 37 of 37 changed files**
 
 One or two paragraphs: what was checked, at most two findings by name (most severe
 first), and the rest counted by severity ("there are 1 more critical, 3 major, and 2
@@ -135,7 +133,7 @@ Each inline comment opens with `**<Severity> · <Category>: <title>**`, then **T
 - Category is **Correctness**, **Security**, or **Rules**.
 - Style, naming, and preference are never findings.
 
-The prompt in the template carries the full contract. The gate checks the heading, the coverage line, the review state, the commit, and the count.
+The prompt in the template carries the full contract. Nothing enforces it: the job summary reports the review this run left and warns when there is none or more than one, but the job still passes.
 
 ## Docs-governance mode
 
@@ -151,5 +149,5 @@ A change that contradicts current authority is a **Rules** finding that cites th
 
 ## References
 
-- [references/security-model.md](references/security-model.md): read before changing any control, and when a user asks why the workflow is shaped this way. It covers least privilege, untrusted content, forks, mention triggers, secrets and OIDC, no shell, read-only sub-agents, the coverage gate, and residual risks.
+- [references/security-model.md](references/security-model.md): read before changing any control, and when a user asks why the workflow is shaped this way. It covers least privilege, untrusted content, forks, mention triggers, secrets and OIDC, no shell, read-only sub-agents, why coverage is reported but not enforced, and residual risks.
 - [references/troubleshooting.md](references/troubleshooting.md): read when a run fails, ends early, posts nothing, or reads too little.

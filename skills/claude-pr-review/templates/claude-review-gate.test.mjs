@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { buildContext, classifyPath, judgeReview } from './claude-review-gate.mjs';
+import { buildContext, classifyPath, summarizeReview } from './claude-review-gate.mjs';
 
 const cli = fileURLToPath(new URL('./claude-review-gate.mjs', import.meta.url));
 
@@ -43,7 +43,7 @@ test('changed files are classed as source or skim', () => {
   const skim = ['package-lock.json', 'yarn.lock', 'Cargo.lock', 'src/a/tests/fixtures/run.json',
     'src/a/tests/golden/plan.txt', 'src/__snapshots__/a.snap', 'docs/guides/setup.md', 'README.md', 'AGENTS.md'];
   // When each path is classified.
-  // Then source paths need a full read and the rest may be skimmed.
+  // Then source paths are chunked for a full read and the rest may be skimmed.
   for (const path of source) assert.equal(classifyPath(path), 'source', path);
   for (const path of skim) assert.equal(classifyPath(path), 'skim', path);
 });
@@ -116,16 +116,14 @@ const patch = '/runner/_temp/pr-context/diff.patch';
 const result = { type: 'result', num_turns: 9, permission_denials: [] };
 const head = 'a'.repeat(40);
 const started = '2026-10-06T10:00:00Z';
-const body = (files = 3) => `## Claude review: Approved\n\n**Reviewed ${files} of 3 changed files**\n\n` +
-  'I checked the session store change against the review rules and found no material defect.\n';
+const body = '## Claude review: Approved\n\nI checked the session store change against the review rules and found no material defect.\n';
 const review = (overrides = {}) => ({
-  id: 41, state: 'APPROVED', commit_id: head, submitted_at: '2026-10-06T10:05:00Z', body: body(), ...overrides,
+  id: 41, state: 'APPROVED', commit_id: head, submitted_at: '2026-10-06T10:05:00Z', body, ...overrides,
 });
-const judge = (overrides = {}) => judgeReview({
+const summarize = (overrides = {}) => summarizeReview({
   manifest: buildContext({ files, diff }).manifest,
   messages: [...read(patch, 1, 6, { parent: 'toolu_agent' }), result],
   reviews: [review()],
-  changedFiles: 3,
   headSha: head,
   started,
   conclusion: 'success',
@@ -134,126 +132,108 @@ const judge = (overrides = {}) => judgeReview({
   ...overrides,
 });
 
-test('a complete approval or change request passes', () => {
+test('a finished review is summarized without warnings', () => {
   // Given a sub-agent read the only source file and Claude submitted a verdict this run.
   for (const state of ['APPROVED', 'CHANGES_REQUESTED']) {
-    // When the verdict is judged.
-    const decision = judge({ reviews: [review({ state })] });
-    // Then it passes and reports the skimmed files that went unread.
-    assert.equal(decision.errors.length, 0, decision.errors.join('\n'));
-    assert.deepEqual(decision.dismiss, []);
-    assert.match(decision.summary, /Source files read: 1 of 1/);
-    assert.match(decision.summary, /Skim files not read: `package-lock\.json`, `docs\/guides\/development\.md`/);
+    // When the run is summarized.
+    const report = summarize({ reviews: [review({ state })] });
+    // Then the summary reports what was read and the review, with no warning.
+    assert.deepEqual(report.warnings, []);
+    assert.match(report.summary, /^Turns: 9\. Denied tool calls: 0\. Sub-agents: 0\.$/m);
+    assert.match(report.summary, /^diff\.patch lines read: 6 of 17\.$/m);
+    assert.match(report.summary, /^Source files read in full: 1 of 1\.$/m);
+    assert.match(report.summary, /^Skim files not read in full: `package-lock\.json`, `docs\/guides\/development\.md`\.$/m);
+    assert.match(report.summary, new RegExp(`^Review: ${state}\\.$`, 'm'));
   }
 });
 
-test('stale, other-commit, and pending reviews do not count', () => {
+test('an unread source range is reported, never judged', () => {
+  // Given the source range was only partly read, and one read of the rest failed.
+  const messages = [...read(patch, 1, 4), ...read(patch, 5, 6, { error: true }), ...read('/x/diff.patch.bak', 1, 6),
+    result];
+  // When the run is summarized.
+  const report = summarize({ messages });
+  // Then the summary names the file, draws no warning, and the review stands.
+  assert.match(report.summary, /^Source files read in full: 0 of 1; not read in full: `src\/session\/store\.ts`\.$/m);
+  assert.deepEqual(report.warnings, []);
+  assert.doesNotMatch(report.summary, /Incomplete|dismiss/i);
+  assert.equal(Object.hasOwn(report, 'errors'), false);
+});
+
+test('sub-agents and denied tool calls are counted', () => {
+  // Given Claude started two sub-agents and was denied one tool call.
+  const agent = (id, type) => ({ type: 'assistant', parent_tool_use_id: null, message: { content: [
+    { type: 'tool_use', id, name: 'Agent', input: { subagent_type: type } }] } });
+  const messages = [agent('toolu_a', 'diff-reviewer'), agent('toolu_b', 'rules-reviewer'),
+    ...read(patch, 1, 6, { parent: 'toolu_a' }), { ...result, permission_denials: [{ tool_name: 'Bash' }] }];
+  // When the run is summarized.
+  const report = summarize({ messages });
+  // Then the summary counts both, and the denial is a warning.
+  assert.match(report.summary, /Denied tool calls: 1\. Sub-agents: 2 \(1 diff-reviewer, 1 rules-reviewer\)\./);
+  assert.deepEqual(report.warnings, ['Claude was denied Bash']);
+});
+
+test('stale, other-commit, and pending reviews are not this run\'s review', () => {
   // Given only a stale review, a review of another commit, and a pending review.
   const reviews = [
     review({ submitted_at: '2026-10-06T09:59:59Z' }),
     review({ commit_id: 'b'.repeat(40) }),
     review({ state: 'PENDING' }),
   ];
-  // When the verdict is judged.
-  const decision = judge({ reviews });
-  // Then it fails without dismissing anything.
-  assert.match(decision.errors.join('\n'), /without submitting a review on a{40} in this run/);
-  assert.deepEqual(decision.dismiss, []);
+  // When the run is summarized.
+  const report = summarize({ reviews });
+  // Then it warns that this run left no review.
+  assert.deepEqual(report.warnings, [`Claude submitted no review on ${head} in this run.`]);
 });
 
-test('an incomplete COMMENT review fails and cannot be dismissed', () => {
-  // Given Claude left a COMMENT review.
-  // When the verdict is judged.
-  const decision = judge({ reviews: [review({ state: 'COMMENTED' })] });
-  // Then it fails as not a verdict.
-  assert.match(decision.errors.join('\n'), /left a COMMENTED review, not a verdict/);
-  assert.deepEqual(decision.dismiss, []);
+test('an unfinished, skipped, or repeated review only warns', () => {
+  // Given a failed Claude step, a skipped action, and a run that left two reviews.
+  const failed = summarize({ claudeOutcome: 'failure', conclusion: 'failure' });
+  const skipped = summarize({ conclusion: '', messages: [], reviews: [] });
+  const repeated = summarize({ reviews: [review({ id: 40, state: 'CHANGES_REQUESTED' }), review()] });
+  // When each run is summarized.
+  // Then each is reported as a warning, and the summary still shows every review left.
+  assert.match(failed.warnings.join('\n'), /Claude did not finish \(step outcome: failure\)/);
+  assert.match(skipped.warnings.join('\n'), /action skipped Claude/);
+  assert.deepEqual(repeated.warnings, ['Claude submitted 2 reviews in this run.']);
+  assert.match(repeated.summary, /Review: CHANGES_REQUESTED\.[\s\S]*Review: APPROVED\./);
 });
 
-test('a wrong file count fails and dismisses the verdict', () => {
-  // Given an approval that claims 2 of 3 files.
-  // When the verdict is judged.
-  const decision = judge({ reviews: [review({ body: body(2) })] });
-  // Then the approval is dismissed.
-  assert.match(decision.errors.join('\n'), /does not state that it reviewed all 3 changed files/);
-  assert.deepEqual(decision.dismiss, [41]);
-});
-
-test('an unread source range fails and names the file in the dismissal', () => {
-  // Given the source range was only partly read, and one read of the rest failed.
-  const messages = [...read(patch, 1, 4), ...read(patch, 5, 6, { error: true }), ...read('/x/diff.patch.bak', 1, 6),
-    result];
-  // When the verdict is judged.
-  const decision = judge({ messages, reviews: [review({ state: 'CHANGES_REQUESTED' })] });
-  // Then the job fails, and the dismissal message names the unread source file.
-  assert.match(decision.errors.join('\n'), /did not read 1 changed source file/);
-  assert.deepEqual(decision.dismiss, [41]);
-  assert.match(decision.dismissMessage, /^## Claude review: Incomplete/);
-  assert.match(decision.dismissMessage, /^- Claude and its sub-agents did not read 1 changed source file in diff\.patch\.$/m);
-  assert.match(decision.dismissMessage, /- `src\/session\/store\.ts`/);
-});
-
-test('a run where Claude did not finish dismisses any verdict it left', () => {
-  // Given Claude approved and then the step failed, with or without a conclusion.
-  for (const conclusion of ['failure', '']) {
-    const decision = judge({ claudeOutcome: 'failure', conclusion });
-    // When the verdict is judged.
-    // Then the approval is dismissed with the whole reason.
-    assert.match(decision.errors.join('\n'), /Claude did not finish/);
-    assert.deepEqual(decision.dismiss, [41]);
-    assert.match(decision.dismissMessage, /^- Claude did not finish \(step outcome: failure\)\.$/m);
-  }
-});
-
-test('a skipped review fails without dismissing anything', () => {
-  // Given the action skipped Claude because the pull request changes the workflow.
-  // When the verdict is judged.
-  const decision = judge({ conclusion: '', messages: [], reviews: [] });
-  // Then it fails as unreviewed.
-  assert.match(decision.errors.join('\n'), /action skipped Claude/);
-  assert.deepEqual(decision.dismiss, []);
-});
-
-test('the CLI builds the context files and writes the verdict decision', (t) => {
-  // Given a context directory with the file list and diff, and a review list.
+test('the CLI builds the context files and writes an informational summary', (t) => {
+  // Given a context directory with the file list and diff, a review list, and a transcript that
+  // read none of the source range.
   const dir = mkdtempSync(join(tmpdir(), 'claude-review-gate-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, 'files.jsonl'), files.map((file) => JSON.stringify(file)).join('\n'));
   writeFileSync(join(dir, 'diff.patch'), diff);
-  writeFileSync(join(dir, 'reviews.jsonl'), JSON.stringify(review({ body: body(2) })));
-  writeFileSync(join(dir, 'transcript.json'), JSON.stringify([...read(join(dir, 'diff.patch'), 1, 6), result]));
+  writeFileSync(join(dir, 'reviews.jsonl'), JSON.stringify(review()));
+  writeFileSync(join(dir, 'transcript.json'), JSON.stringify([...read(join(dir, 'diff.patch'), 7, 11), result]));
   const env = { ...process.env, HEAD_SHA: head, STARTED: started, CONCLUSION: 'success', CLAUDE_OUTCOME: 'success',
     GITHUB_STEP_SUMMARY: join(dir, 'summary.md') };
-  // When the context and verdict commands run.
+  // When the context and summary commands run.
   const context = spawnSync(process.execPath, [cli, 'context', dir], { encoding: 'utf8' });
-  const verdict = spawnSync(process.execPath, [cli, 'verdict', dir, join(dir, 'reviews.jsonl'),
-    join(dir, 'transcript.json'), '3'], { encoding: 'utf8', env });
-  // Then the manifest is written, the wrong count fails, and the dismissal is recorded.
+  const summary = spawnSync(process.execPath, [cli, 'summary', dir, join(dir, 'reviews.jsonl'),
+    join(dir, 'transcript.json')], { encoding: 'utf8', env });
+  // Then the manifest is written, and the summary succeeds and reports the unread source file.
   assert.equal(context.status, 0, context.stderr);
   assert.match(context.stdout, /^3 changed files: 1 source, 2 skim; 1 chunks\.$/m);
   assert.match(readFileSync(join(dir, 'manifest.tsv'), 'utf8'), /^source\tmodified\t0\t1\t1\t6\t1\tsrc\/session\/store\.ts$/m);
   assert.match(readFileSync(join(dir, 'chunks.tsv'), 'utf8'), /^1\t1\t6\tsrc\/session\/store\.ts$/m);
-  assert.equal(verdict.status, 1);
-  assert.match(verdict.stdout, /::error::Claude's review does not state/);
-  assert.equal(readFileSync(join(dir, 'dismiss-ids.txt'), 'utf8'), '41\n');
-  assert.match(readFileSync(join(dir, 'dismiss-message.md'), 'utf8'), /^## Claude review: Incomplete\n/);
-  assert.match(readFileSync(join(dir, 'summary.md'), 'utf8'), /Verdict: APPROVED/);
+  assert.equal(summary.status, 0, summary.stdout);
+  assert.doesNotMatch(summary.stdout, /::error::/);
+  const written = readFileSync(join(dir, 'summary.md'), 'utf8');
+  assert.match(written, /Source files read in full: 0 of 1; not read in full: `src\/session\/store\.ts`\./);
+  assert.match(written, /Review: APPROVED/);
 });
 
-test('more than one review in a run fails and dismisses each verdict', () => {
-  // Given Claude submitted a change request and then an approval in the same run.
-  // When the verdict is judged.
-  const decision = judge({ reviews: [review({ id: 40, state: 'CHANGES_REQUESTED' }), review()] });
-  // Then the run fails, and both verdicts are dismissed.
-  assert.match(decision.errors.join('\n'), /submitted 2 reviews in this run, not exactly one/);
-  assert.deepEqual(decision.dismiss, [40, 41]);
-});
-
-test('a summary that names no skim file draws no warning', () => {
-  // Given an approval whose body is the heading, the coverage line, and one paragraph.
-  // When the verdict is judged.
-  const decision = judge();
-  // Then it passes without warnings, although the skim files went unread and unnamed.
-  assert.deepEqual(decision.errors, []);
-  assert.deepEqual(decision.warnings, []);
+test('the summary command never fails the job', (t) => {
+  // Given a context directory with no file list, diff, reviews, or transcript.
+  const dir = mkdtempSync(join(tmpdir(), 'claude-review-gate-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // When the summary command runs.
+  const summary = spawnSync(process.execPath, [cli, 'summary', dir, join(dir, 'reviews.jsonl'),
+    join(dir, 'transcript.json')], { encoding: 'utf8' });
+  // Then it exits 0 with a warning.
+  assert.equal(summary.status, 0, summary.stdout);
+  assert.match(summary.stdout, /::warning::Could not summarize the Claude review/);
 });

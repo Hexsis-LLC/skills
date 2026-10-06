@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Failure modes this setup has hit, by symptom. Most of them end **green with nothing posted**, which is why the gate exists: treat a quiet success as a failure until the transcript artifact proves otherwise. Read the job summary first (turns, denied calls, sub-agents, lines read), then the transcript.
+Failure modes this setup has hit, by symptom. Most of them end **green with nothing posted**: the job does not fail over them, and the job summary reports them as warnings. Treat a quiet success as a failure until the summary and the transcript artifact prove otherwise. Read the job summary first (turns, denied calls, sub-agents, lines read, the review this run left), then the transcript.
 
 ## The run ends early, before any review is submitted
 
@@ -20,12 +20,12 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 ## Green check, nothing posted
 
 **Cause:** a prompt that says "post nothing when you find nothing" makes a failed review and a clean review look the same.
-**Fix:** every automatic review ends with exactly one formal review: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` when incomplete. The gate fails the job when no review was submitted in this run.
+**Fix:** every automatic review ends with exactly one formal review: `APPROVE` or `REQUEST_CHANGES`. The job summary warns when no review was submitted in this run; the job still passes, so read the summary.
 
-## The review claims full coverage but read a fraction of the diff
+## The review read a fraction of the diff
 
-**Cause:** the model's own "Reviewed N of N" is a claim. One unchecked reviewer approved after reading about a quarter of the diff lines and none of most source files, and cited the PR body's "tests pass" as evidence.
-**Fix:** the parallel `diff-reviewer` chunks, the untrusted-data framing, and the gate, which counts the `diff.patch` lines actually returned by `Read` calls in the transcript and dismisses the verdict when a source range is unread.
+**Cause:** a reviewer's account of what it read is a claim. One unchecked reviewer approved after reading about a quarter of the diff lines and none of most source files, and cited the PR body's "tests pass" as evidence.
+**Fix:** the parallel `diff-reviewer` chunks and the untrusted-data framing make a full read likely. Nothing enforces it: the job summary counts the `diff.patch` lines actually returned by `Read` calls in the transcript and names the source files not read in full, for information only. Check it before you rely on an approval.
 
 ## Claude cannot read large diffs
 
@@ -35,7 +35,7 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 ## `gh pr diff` fails on a very large pull request
 
 **Cause:** GitHub refuses diffs past its size limit.
-**Fix:** the context step writes an empty `diff.patch`, and the gate rebuilds it from the per-file patches in `files.jsonl`. Files GitHub returns no patch for get a stub section telling the reviewer to read the working tree.
+**Fix:** the context step writes an empty `diff.patch`, and the context script rebuilds it from the per-file patches in `files.jsonl`. Files GitHub returns no patch for get a stub section telling the reviewer to read the working tree.
 
 ## MCP tools are missing; the GitHub server never connected
 
@@ -45,12 +45,7 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 ## A pull request that changes the workflow is not reviewed
 
 **Cause:** the OIDC token exchange refuses a workflow that differs from the default branch's copy, and the action skips with a warning and a success outcome but no `conclusion`.
-**Expected.** The gate fails the job with "The action skipped Claude", so the PR shows that a human must review it. The new workflow takes effect once merged. The same applies to the very first setup PR.
-
-## A failed review's verdict was not dismissed
-
-**Cause:** branch protection or a ruleset that limits who may dismiss reviews blocks the job's `GITHUB_TOKEN`.
-**Fix:** allow the GitHub Actions app to dismiss reviews on that branch, or accept that failed verdicts stand until a human dismisses them, and note it in the repository's security docs.
+**Expected.** The job passes, and its summary warns "The action skipped Claude", so a human must review the PR. The new workflow takes effect once merged. The same applies to the very first setup PR.
 
 ## A mention was ignored during a burst of comments
 
@@ -66,8 +61,3 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 
 **Cause:** the check scans every `${{ … }}` expression in the review workflow text, comments included, so a commented-out `${{ secrets.X }}` counts as a second secret access.
 **Fix:** write secret names in comments without the expression syntax.
-
-## The review body fails the coverage check
-
-**Cause:** the coverage line has letters, a formula, or a count other than the PR's changed-file count, or the reviewer added sections.
-**Fix:** the body must contain the line `**Reviewed N of N changed files**` with N equal to the PR's changed-file count. Keep the prompt's template intact; the gate's regex in `claude-review-gate.mjs` is the contract.

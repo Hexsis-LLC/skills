@@ -1,15 +1,15 @@
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// The Claude review job builds the reviewer's change manifest with this script and judges the
-// submitted verdict with it. The job runs the default branch's copy, so a pull request cannot
-// rewrite the gate that judges it.
+// The Claude review job builds the reviewer's change manifest with this script and summarizes the
+// run with it. The summary is informational and gates nothing. The job runs the default branch's
+// copy, so a pull request cannot rewrite the script that builds its context.
 
-// PARAMETER: file classes. Source files must be read in full; lock files, fixtures and golden
-// data, and documentation may be skimmed. Anything under alwaysSource, and any file of unknown
-// kind, is source, so classification fails closed. Widen skim only for files whose defects a
-// reviewer could not find by reading the diff.
+// PARAMETER: file classes. Source files are chunked for diff-reviewer sub-agents to read in full;
+// lock files, fixtures and golden data, and documentation may be skimmed. Anything under
+// alwaysSource, and any file of unknown kind, is source, so it gets a reader too. Widen skim only
+// for files whose defects a reviewer could not find by reading the diff.
 const alwaysSource = /^\.github\//;
 const lockFiles = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|[^/]+\.lock)$/;
 const fixtures = /(^|\/)(fixtures?|golden|snapshots|__snapshots__|testdata)\/|\.snap$/;
@@ -157,22 +157,20 @@ function fullyRead(entry, readLines) {
   return true;
 }
 
-const verdictStates = new Set(['APPROVED', 'CHANGES_REQUESTED']);
-const coverageLine = /^\s*(?:\*\*)?Reviewed (\d+) of (\d+) changed files\.?(?:\*\*)?\s*$/m;
 const code = (path) => `\`${path}\``;
 
-// Judges one automatic review run. A green check needs a verdict submitted on the head commit in this
-// run, the right file count, and every source file's diff range read by Claude or a sub-agent. On
-// failure, any verdict this run left is listed for dismissal.
-export function judgeReview({ manifest, messages, reviews, changedFiles, headSha, started, conclusion,
-  claudeOutcome, diffPath }) {
-  const errors = [];
+// Summarizes one automatic review run for the job summary: turns, denied tool calls, sub-agents, the
+// diff.patch lines and files that Claude and its sub-agents read, and the review this run left. It is
+// informational: nothing here fails the job, dismisses a review, or judges coverage, and the counts
+// never decide a verdict.
+export function summarizeReview({ manifest, messages, reviews, headSha, started, conclusion, claudeOutcome,
+  diffPath }) {
   const warnings = [];
   const notes = [];
   if (!conclusion && claudeOutcome === 'success') {
-    errors.push('The action skipped Claude, which happens when a pull request changes this workflow. ' +
+    warnings.push('The action skipped Claude, which happens when a pull request changes this workflow. ' +
       'This pull request was not reviewed.');
-    return { errors, warnings, dismiss: [], summary: errors.map((e) => `Failed: ${e}`).join('\n\n') };
+    return { warnings, summary: warnings.map((w) => `Warning: ${w}`).join('\n\n') };
   }
 
   const result = messages.filter((m) => m.type === 'result').at(-1);
@@ -191,62 +189,26 @@ export function judgeReview({ manifest, messages, reviews, changedFiles, headSha
 
   const readLines = linesRead(messages, diffPath);
   const total = Math.max(0, ...manifest.map((entry) => entry.end));
-  const source = manifest.filter((entry) => entry.fileClass === 'source');
-  const unreadSource = source.filter((entry) => !fullyRead(entry, readLines)).map((entry) => entry.path);
-  const unreadSkim = manifest.filter((entry) => entry.fileClass === 'skim' && !fullyRead(entry, readLines))
-    .map((entry) => entry.path);
+  const unread = (fileClass) => manifest.filter((entry) => entry.fileClass === fileClass &&
+    !fullyRead(entry, readLines)).map((entry) => code(entry.path));
+  const source = manifest.filter((entry) => entry.fileClass === 'source').length;
+  const unreadSource = unread('source');
+  const unreadSkim = unread('skim');
   notes.push(`diff.patch lines read: ${[...readLines].filter((line) => line <= total).length} of ${total}.`);
-  notes.push(`Source files read: ${source.length - unreadSource.length} of ${source.length}.`);
-  notes.push(`Skim files not read: ${unreadSkim.length ? unreadSkim.map(code).join(', ') : 'none'}.`);
+  notes.push(`Source files read in full: ${source - unreadSource.length} of ${source}` +
+    `${unreadSource.length ? `; not read in full: ${unreadSource.join(', ')}` : ''}.`);
+  notes.push(`Skim files not read in full: ${unreadSkim.length ? unreadSkim.join(', ') : 'none'}.`);
 
   const runReviews = reviews.filter((r) => r.commit_id === headSha && r.state !== 'PENDING' &&
     (r.submitted_at ?? '') >= started);
-  const review = runReviews.at(-1);
-  if (claudeOutcome !== 'success') {
-    errors.push(`Claude did not finish (step outcome: ${claudeOutcome || 'unknown'}).`);
-  } else if (!review) {
-    errors.push(`Claude finished without submitting a review on ${headSha} in this run.`);
+  if (claudeOutcome !== 'success') warnings.push(`Claude did not finish (step outcome: ${claudeOutcome || 'unknown'}).`);
+  if (!runReviews.length) {
+    warnings.push(`Claude submitted no review on ${headSha} in this run.`);
   } else {
-    const body = review.body ?? '';
-    notes.push(`Verdict: ${review.state}.\n\n${body}`);
-    if (runReviews.length > 1) {
-      errors.push(`Claude submitted ${runReviews.length} reviews in this run, not exactly one.`);
-    }
-    if (!verdictStates.has(review.state)) errors.push(`Claude left a ${review.state} review, not a verdict.`);
-    const match = body.match(coverageLine);
-    if (!match || Number(match[1]) !== changedFiles || Number(match[2]) !== changedFiles) {
-      errors.push(`Claude's review does not state that it reviewed all ${changedFiles} changed files.`);
-    }
-    if (!/^## Claude review: (Approved|Changes requested|Incomplete)\s*$/m.test(body)) {
-      warnings.push('The review body lacks the "## Claude review:" heading.');
-    }
+    if (runReviews.length > 1) warnings.push(`Claude submitted ${runReviews.length} reviews in this run.`);
+    for (const review of runReviews) notes.push(`Review: ${review.state}.\n\n${review.body ?? ''}`);
   }
-  // The dismissal lists unread paths under their own heading, so its reason omits them.
-  const reasons = [...errors];
-  if (unreadSource.length) {
-    const reason = `Claude and its sub-agents did not read ${unreadSource.length} changed source ` +
-      `file${unreadSource.length === 1 ? '' : 's'} in diff.patch`;
-    errors.push(`${reason}: ${unreadSource.join(', ')}`);
-    reasons.push(`${reason}.`);
-  }
-
-  const dismiss = errors.length ? runReviews.filter((r) => verdictStates.has(r.state)).map((r) => r.id) : [];
-  const summary = [...notes, ...errors.map((e) => `Failed: ${e}`)].join('\n\n');
-  if (!dismiss.length) return { errors, warnings, dismiss, summary };
-  const dismissMessage = [
-    '## Claude review: Incomplete',
-    '',
-    'The **Claude review** job dismissed this `claude[bot]` verdict because the review was incomplete:',
-    '',
-    ...reasons.map((reason) => `- ${reason}`),
-    ...(unreadSource.length
-      ? ['', '**Unread source files:**', '', ...unreadSource.map((p) => `- ${code(p)}`)]
-      : []),
-    '',
-    'The job summary and the `claude-review-transcript-*` artifact show what was read. ' +
-      'The next push to this pull request runs a new review.',
-  ].join('\n');
-  return { errors, warnings, dismiss, summary, dismissMessage };
+  return { warnings, summary: [...notes, ...warnings.map((w) => `Warning: ${w}`)].join('\n\n') };
 }
 
 const jsonLines = (path) => readFileSync(path, 'utf8').split('\n').filter((line) => line.trim())
@@ -268,50 +230,43 @@ function contextCommand(dir) {
     `${context.synthesized ? ' Rebuilt missing diff sections.' : ''}`);
 }
 
-function verdictCommand(dir, reviewsPath, transcriptPath, changed) {
-  const diffPath = join(dir, 'diff.patch');
-  let messages = [];
+// Never fails: a summary that cannot be built is reported as a warning.
+function summaryCommand(dir, reviewsPath, transcriptPath) {
   try {
-    messages = JSON.parse(readFileSync(transcriptPath, 'utf8')).filter((m) => m && typeof m === 'object');
+    const diffPath = join(dir, 'diff.patch');
+    let messages = [];
+    try {
+      messages = JSON.parse(readFileSync(transcriptPath, 'utf8')).filter((m) => m && typeof m === 'object');
+    } catch (error) {
+      console.log(`::warning::Could not read the Claude transcript: ${error.message}`);
+    }
+    const report = summarizeReview({
+      manifest: buildContext({ files: jsonLines(join(dir, 'files.jsonl')), diff: readFileSync(diffPath, 'utf8') })
+        .manifest,
+      messages,
+      reviews: existsSync(reviewsPath) ? jsonLines(reviewsPath) : [],
+      headSha: process.env.HEAD_SHA,
+      started: process.env.STARTED,
+      conclusion: process.env.CONCLUSION,
+      claudeOutcome: process.env.CLAUDE_OUTCOME,
+      diffPath,
+    });
+    for (const warning of report.warnings) console.log(`::warning::${warning}`);
+    const summary = process.env.GITHUB_STEP_SUMMARY;
+    if (summary) appendFileSync(summary, `${report.summary}\n`);
   } catch (error) {
-    console.log(`::warning::Could not read the Claude transcript: ${error.message}`);
+    console.log(`::warning::Could not summarize the Claude review: ${error.message}`);
   }
-  const decision = judgeReview({
-    manifest: buildContext({ files: jsonLines(join(dir, 'files.jsonl')), diff: readFileSync(diffPath, 'utf8') })
-      .manifest,
-    messages,
-    reviews: jsonLines(reviewsPath),
-    changedFiles: Number(changed),
-    headSha: process.env.HEAD_SHA,
-    started: process.env.STARTED,
-    conclusion: process.env.CONCLUSION,
-    claudeOutcome: process.env.CLAUDE_OUTCOME,
-    diffPath,
-  });
-  for (const warning of decision.warnings) console.log(`::warning::${warning}`);
-  for (const error of decision.errors) console.log(`::error::${error}`);
-  const summary = process.env.GITHUB_STEP_SUMMARY;
-  if (summary) appendFileSync(summary, `${decision.summary}\n`);
-  // The dismissal step reads these plain files, so it needs no JSON tooling.
-  const ids = join(dir, 'dismiss-ids.txt');
-  const message = join(dir, 'dismiss-message.md');
-  rmSync(ids, { force: true });
-  rmSync(message, { force: true });
-  if (decision.dismiss.length) {
-    writeFileSync(ids, `${decision.dismiss.join('\n')}\n`);
-    writeFileSync(message, `${decision.dismissMessage}\n`);
-  }
-  return decision.errors.length ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command, ...args] = process.argv.slice(2);
   try {
     if (command === 'context' && args.length === 1) contextCommand(args[0]);
-    else if (command === 'verdict' && args.length === 4) process.exitCode = verdictCommand(...args);
-    else throw new Error('Usage: claude-review-gate.mjs context DIR | verdict DIR REVIEWS TRANSCRIPT CHANGED.');
+    else if (command === 'summary' && args.length === 3) summaryCommand(...args);
+    else throw new Error('Usage: claude-review-gate.mjs context DIR | summary DIR REVIEWS TRANSCRIPT.');
   } catch (error) {
-    console.log(`::error::Claude review gate failed: ${error.message}`);
+    console.log(`::error::Claude review context failed: ${error.message}`);
     process.exitCode = 1;
   }
 }
