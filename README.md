@@ -12,6 +12,7 @@ npx -y skills add hexsis-llc/skills
 
 ## Included Skills
 
+- `claude-pr-review`: Sets up review-only Claude pull-request review in GitHub Actions, with read-only sub-agents and a source-coverage gate.
 - `git-committer`: Generates concise conventional one-line commit messages from a git diff.
 - `gwt-tester`: Helps write or refactor tests into clear Given/When/Then structure.
 - `pub-package-explorer`: Finds and reads Dart/Flutter package source from local deps or pub.dev.
