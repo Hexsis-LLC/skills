@@ -12,6 +12,7 @@ npx -y skills add hexsis-llc/skills
 
 ## Included Skills
 
+- `docs-governance`: Routes, authority checks, and change control for documentation-governed repositories, layered on Matt Pocock's skills.
 - `git-committer`: Generates concise conventional one-line commit messages from a git diff.
 - `gwt-tester`: Helps write or refactor tests into clear Given/When/Then structure.
 - `pub-package-explorer`: Finds and reads Dart/Flutter package source from local deps or pub.dev.
