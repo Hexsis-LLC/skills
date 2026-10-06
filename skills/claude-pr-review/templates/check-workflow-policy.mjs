@@ -16,7 +16,8 @@ const reviewTokenInput = 'claude_code_oauth_token';
 const builtInAgents = ['general-purpose', 'claude', 'Explore', 'Plan', 'statusline-setup',
   'claude-code-guide'];
 
-const reviewWriteScopes = new Set(['pull-requests', 'issues', 'id-token']);
+// Claude posts reviews with its app token, so the job token needs no pull-requests: write.
+const reviewWriteScopes = new Set(['issues', 'id-token']);
 const reviewAction = /^anthropics\/claude-code-action@[0-9a-f]{40}$/;
 const reviewTokenValue = `\${{ secrets.${reviewSecret} }}`;
 // The reviewer may approve, so its app token must stay unable to push or merge, the merge tool and

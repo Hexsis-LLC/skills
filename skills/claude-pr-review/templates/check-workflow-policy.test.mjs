@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
       issues: write
       id-token: write
     env:
@@ -106,6 +106,7 @@ test('the review exception does not widen to other scopes, secrets, jobs, or wor
   const cases = [
     ['claude-review.yml', review.replace('contents: read\n      pull', 'contents: write\n      pull'), /write permissions/],
     ['claude-review.yml', review.replace('id-token: write', 'id-token: write\n      actions: write'), /write permissions/],
+    ['claude-review.yml', review.replace('pull-requests: read', 'pull-requests: write'), /write permissions/],
     ['claude-review.yml', review.replace('CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'), /may read a secret/],
     ['claude-review.yml', review.replace('secrets.CLAUDE_CODE_OAUTH_TOKEN', "secrets['CLAUDE_CODE_OAUTH_TOKEN']"), /may read a secret/],
     ['claude-review.yml', review.replace('secrets.CLAUDE_CODE_OAUTH_TOKEN', 'Secrets.CLAUDE_CODE_OAUTH_TOKEN'), /may read a secret/],
