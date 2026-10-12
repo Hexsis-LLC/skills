@@ -22,7 +22,7 @@ What the setup does:
 | [`templates/check-workflow-policy.mjs`](templates/check-workflow-policy.mjs) | `scripts/check-workflow-policy.mjs` | Enforces the secret and permission boundary in CI |
 | `templates/*.test.mjs` | `scripts/*.test.mjs` | `node:test` suites for both scripts |
 
-The scripts need Node.js 22 or later and no dependencies. Search the templates for `PARAMETER` to find each repo-specific choice.
+The scripts need Node.js 22 or later and no dependencies. They go in `scripts/` unless that directory feeds a build; see [Choose the script directory](#choose-the-script-directory). Search the templates for `PARAMETER` to find each repo-specific choice.
 
 ## Parameters
 
@@ -38,7 +38,7 @@ The scripts need Node.js 22 or later and no dependencies. Search the templates f
 | Chunk size | 800 diff lines | `defaultChunkLines` in the script |
 | Max turns, timeout | 100 turns, 30 minutes | `--max-turns`, `timeout-minutes`. Sub-agent turns do not count toward max turns. |
 | Transcript retention | 7 days | the upload step. On a public repository, anyone can download the transcript. |
-| Script directory | `scripts/` | the two `node "$RUNNER_TEMP/trusted-rules/scripts/..."` lines, and the policy check's default root |
+| Script directory | `scripts/`, or `.github/scripts/` when `scripts/` feeds a build | every reference listed in [Choose the script directory](#choose-the-script-directory) |
 
 ## Set Up
 
@@ -52,8 +52,18 @@ Read, don't assume:
 - branch protection and rulesets on the default branch, especially required-review rules;
 - whether any workflow uses `secrets: inherit` or `toJSON(secrets)`. The policy check blocks both, because they would hand the review secret to another workflow;
 - the docs-governance markers (see [Docs-governance mode](#docs-governance-mode)).
+- whether anything builds from `scripts/`: a Dockerfile `COPY`, an image recipe, a packaging list, or a hash or digest computed over the directory. If so, the review scripts go in `.github/scripts/` (see [Choose the script directory](#choose-the-script-directory)).
 
 Then show the user the parameter table with the values you chose, and get their confirmation. **Done when** every parameter has a value the user has seen.
+
+#### Choose the script directory
+
+The scripts default to `scripts/`. Some repositories copy or hash `scripts/` into a build artifact, such as a container image or a runner-image recipe digest. Review scripts there would land in that artifact and change its digest on every review-script edit. Search the repository for `scripts/` in Dockerfiles, build files, and workflows before you choose. If `scripts/` feeds a build, use `.github/scripts/` and set every reference to it:
+
+- the two `node "$RUNNER_TEMP/trusted-rules/scripts/claude-review-gate.mjs"` lines in the workflow, in `Fetch pull-request context` and `Summarize review`;
+- the `scripts/check-workflow-policy.mjs` path in the workflow's header comment;
+- the test and policy commands in the CI workflow (step 3);
+- the policy check's default root, `new URL('..', import.meta.url)`, which assumes the script sits one directory below the repository root. From `.github/scripts/` it is `new URL('../..', import.meta.url)`.
 
 ### 2. Resolve the pins
 
@@ -71,7 +81,7 @@ The template pins every action by commit SHA. Re-resolve each pin rather than tr
 
 Copy the files into place and set every parameter. Keep each security control intact. Before you change one, read [references/security-model.md](references/security-model.md); it explains what each control closes. Keep the review prompt's output contract intact; the job summary quotes the review it finds but checks nothing in it.
 
-Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-policy.test.mjs` and `node scripts/check-workflow-policy.mjs` to the repository's existing CI. Adapt the test fixtures to the repository's own paths when you change the classes.
+Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-policy.test.mjs` and `node scripts/check-workflow-policy.mjs` to the repository's existing CI. Use the script directory you chose in step 1. Adapt the test fixtures to the repository's own paths when you change the classes.
 
 ### 4. Validate locally
 
@@ -89,7 +99,7 @@ The agent cannot do these. Give them to the user as a checklist:
 
 1. **Install the Claude GitHub App** on the repository: <https://github.com/apps/claude>. It is the identity that posts reviews, through the OIDC token exchange.
 2. **Create the model credential and add it as a repository secret.** For a Claude subscription, run `claude setup-token` and save the result as `CLAUDE_CODE_OAUTH_TOKEN`. For an API key, save it as `ANTHROPIC_API_KEY`. The OAuth token lasts a year, and deleting the secret does not revoke it.
-3. **Merge the setup pull request without its own review.** The token exchange refuses a workflow that differs from the default branch's copy. So the setup PR, and every later PR that edits the workflow, gets no Claude review by design: the job passes, and its summary warns that the action skipped Claude. A human reviews those.
+3. **Merge the setup pull request without its own review.** On the setup PR, the `Claude review` job fails at `Fetch pull-request context` with `MODULE_NOT_FOUND`: that step runs the gate script from the default branch's copy, and the script is not there until the PR merges. This is expected and harmless. After the merge, every later PR that edits the workflow also gets no Claude review, by design: the token exchange refuses a workflow that differs from the default branch's copy, so the job passes and its summary warns that the action skipped Claude. A human reviews those PRs.
 4. **Decide whether a `claude[bot]` approval counts** toward any required-review rule. The safe default is that it does not, and merging stays human.
 
 If the user runs `/install-github-app` instead, keep the app and the secret it creates. Discard its generated workflow in favor of this one.

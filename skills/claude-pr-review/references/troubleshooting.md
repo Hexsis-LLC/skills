@@ -45,7 +45,12 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 ## A pull request that changes the workflow is not reviewed
 
 **Cause:** the OIDC token exchange refuses a workflow that differs from the default branch's copy, and the action skips with a warning and a success outcome but no `conclusion`.
-**Expected.** The job passes, and its summary warns "The action skipped Claude", so a human must review the PR. The new workflow takes effect once merged. The same applies to the very first setup PR.
+**Expected.** The job passes, and its summary warns "The action skipped Claude", so a human must review the PR. The new workflow takes effect once merged.
+
+## The setup pull request's review job fails with `MODULE_NOT_FOUND`
+
+**Cause:** `Fetch pull-request context` runs `claude-review-gate.mjs` from `$RUNNER_TEMP/trusted-rules`, the default branch's copy. On the first setup PR the script is not on the default branch yet, so Node cannot find it and the job fails before Claude starts.
+**Expected.** It is harmless: a human reviews the setup PR, and the job works once the PR merges. Later PRs that edit the workflow get the skip described above and pass. If the failure persists after the merge, check that the script directory in the two `node` lines matches where the scripts live on the default branch.
 
 ## A mention was ignored during a burst of comments
 

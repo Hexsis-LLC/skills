@@ -399,7 +399,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
   try {
-    // PARAMETER: the default root assumes this script sits one directory below the repository root.
+    // PARAMETER: the default root assumes this script sits one directory below the repository root,
+    // as in scripts/. From .github/scripts/, use new URL('../..', import.meta.url).
     const errors = checkWorkflowPolicy(args[1] ?? fileURLToPath(new URL('..', import.meta.url)));
     for (const error of errors) console.error(`BLOCKED ${error}`);
     if (!errors.length) console.log('Workflow policy passed');

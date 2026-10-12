@@ -251,7 +251,8 @@ jobs:
       # Read and Grep; one tool result cannot hold a large diff, and Claude has no shell. The
       # script adds manifest.tsv and chunks.tsv, which class each file as source or skim, give its
       # diff.patch range, and group source ranges into chunks for parallel review.
-      # PARAMETER: script directory (scripts/ here and in the summary step).
+      # PARAMETER: script directory (scripts/ here, in the summary step, and in the header comment).
+      # Use .github/scripts/ when scripts/ is copied or hashed into a build.
       - name: Fetch pull-request context
         id: context
         env:
