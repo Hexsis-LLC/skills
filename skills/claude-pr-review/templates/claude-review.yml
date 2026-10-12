@@ -39,10 +39,15 @@ jobs:
         contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' &&
         contains(github.event.comment.body, '@claude'))
-    # PARAMETER: runner label. A self-hosted label also goes in .github/actionlint.yaml.
+    # PARAMETER: runner label, here and in jobs track and report. A self-hosted label also goes in
+    # .github/actionlint.yaml.
     runs-on: ubuntu-latest
     # PARAMETER: timeout.
     timeout-minutes: 30
+    outputs:
+      conclusion: ${{ steps.claude.outputs.conclusion }}
+      # Job report links this job. Its check run ID is its job ID, so no actions: read is needed.
+      job_id: ${{ job.check_run_id }}
     permissions:
       contents: read
       pull-requests: read
@@ -64,6 +69,9 @@ jobs:
       # Remove every built-in sub-agent type, so only the read-only types in REVIEW_AGENTS exist.
       # DENIED_TOOLS still names each built-in type, in case this variable stops applying.
       CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: '1'
+      # Keep fork mode off. A fork gets the main agent's tools, review tools included.
+      # DENIED_TOOLS also denies Agent(fork).
+      CLAUDE_CODE_FORK_SUBAGENT: '0'
       # Native GitHub tools only; Claude has no Bash. Automatic review reads the change through
       # the read-only sub-agents in REVIEW_AGENTS and submits one formal review with inline
       # findings. Mentions read and comment inline, but cannot submit a verdict or start
@@ -88,7 +96,7 @@ jobs:
       DENIED_TOOLS: >-
         Edit,MultiEdit,Write,NotebookEdit,Bash,Workflow,
         Agent(general-purpose),Agent(claude),Agent(Explore),Agent(Plan),
-        Agent(statusline-setup),Agent(claude-code-guide),
+        Agent(statusline-setup),Agent(claude-code-guide),Agent(fork),
         mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,
         mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,
         mcp__github__merge_pull_request,mcp__github__update_pull_request,
@@ -244,14 +252,15 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
       # Write the change as line-oriented files outside the checkout. Claude pages them with
       # Read and Grep; one tool result cannot hold a large diff, and Claude has no shell. The
       # script adds manifest.tsv and chunks.tsv, which class each file as source or skim, give its
       # diff.patch range, and group source ranges into chunks for parallel review.
-      # PARAMETER: script directory (scripts/ here and in the summary step).
+      # PARAMETER: script directory (scripts/ here, in the summary step, and in the header comment).
+      # Use .github/scripts/ when scripts/ is copied or hashed into a build.
       - name: Fetch pull-request context
         id: context
         env:
@@ -290,7 +299,18 @@ jobs:
           docker tag "$IMAGE@$DIGEST" "$IMAGE:$TAG"
       - name: Run Claude
         id: claude
-        uses: anthropics/claude-code-action@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        # A mention checks out the default branch, and the action then runs its own
+        # `git fetch origin <head branch>` before it sets any git credentials. The checkout keeps no
+        # credentials, so on a private repository that fetch fails. This env-only credential helper
+        # answers that fetch with GITHUB_TOKEN, which the action sets to its own app token
+        # (contents: read) at auth time. Nothing is written to disk. A public repository fetches
+        # without asking for credentials, so the helper is unused there. The policy check keeps the
+        # helper's key and value literal, so no token can be placed in them.
+        env:
+          GIT_CONFIG_COUNT: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          GIT_CONFIG_KEY_0: credential.https://github.com.helper
+          GIT_CONFIG_VALUE_0: '!f() { test "$1" = get || return 0; echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
         with:
           # PARAMETER: auth. For an API key, swap this input for anthropic_api_key with the
           # ANTHROPIC_API_KEY secret, and update both names in the policy check.
@@ -346,9 +366,135 @@ jobs:
       # PARAMETER: transcript retention.
       - name: Upload Claude transcript
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: claude-review-transcript-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/claude-execution-output.json
           if-no-files-found: ignore
           retention-days: 7
+
+  # Tracking comments. Only a comment's author can edit it, and the action revokes its app token
+  # before the job ends, so these comments are github-actions'. Posting on a pull request needs
+  # pull-requests: write, which job review must not hold: its token could then submit or dismiss
+  # reviews. So two small jobs hold that one scope and run only bash steps: no actions, checkout,
+  # container, services, or secrets, and every value comes through env. The policy check enforces
+  # that shape.
+  # The action's track_progress input is not used: it forces tag mode, whose prompt has Claude post
+  # its review into a claude[bot] comment instead of one formal review.
+  track:
+    # Automatic review only, with job review's condition for it. A mention gets the action's own
+    # claude[bot] tracking comment.
+    if: >-
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    # bash runs with -eo pipefail, so a failed gh api call fails the step instead of hiding.
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      comment_id: ${{ steps.post.outputs.comment_id }}
+    steps:
+      - name: Post tracking comment
+        id: post
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="Claude is reviewing \`${HEAD_SHA:0:7}\`…"$'\n\n'"[View job run]($run_url)"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" --jq .id)
+          echo "comment_id=$id" >> "$GITHUB_OUTPUT"
+
+  # Ends the run's tracking comment with job review's result, after it finishes, fails, or is
+  # cancelled. Skipped with job review, so drafts, forks, and comments without a mention get nothing.
+  report:
+    needs: [track, review]
+    if: ${{ always() && needs.review.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Finish tracking comment
+        if: ${{ needs.track.outputs.comment_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ needs.track.outputs.comment_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+          CONCLUSION: ${{ needs.review.outputs.conclusion }}
+          JOB_ID: ${{ needs.review.outputs.job_id }}
+        run: |
+          # Link job review, or the run when its job ID is unknown.
+          job_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [[ "$JOB_ID" =~ ^[0-9]+$ ]]; then job_url="$job_url/job/$JOB_ID"; fi
+          sha="\`${HEAD_SHA:0:7}\`"
+          case "$REVIEW_RESULT" in
+            cancelled) status="Claude's review of $sha was cancelled, by a newer push or by hand. A newer push gets its own review; otherwise re-run the job." ;;
+            success)
+              if [ -n "$CONCLUSION" ]; then
+                status="Claude finished reviewing $sha. Read the job summary before you rely on the verdict."
+              else
+                status="The action skipped Claude, so $sha has no Claude review. A pull request that changes the review workflow is skipped by design."
+              fi
+              ;;
+            *) status="Claude's review of $sha failed. Do not rely on any review from this run." ;;
+          esac
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
+            -f body="$status"$'\n\n'"[View the review job]($job_url)" > /dev/null
+      # A mention's tracking comment belongs to claude[bot], and the action edits it only after its
+      # prepare phase. When the run fails or is cancelled with that comment still "working", post a
+      # note that links the failed job and the stuck comment. The action refuses commenters without
+      # write access, and that refusal fails the job too, so they get no note.
+      - name: Report failed mention
+        if: >-
+          github.event_name != 'pull_request' &&
+          (needs.review.result == 'failure' || needs.review.result == 'cancelled')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          MENTION_URL: ${{ github.event.comment.html_url }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+          JOB_ID: ${{ needs.review.outputs.job_id }}
+        run: |
+          # The legacy permission field reports maintain as write and triage as read. A 404 means
+          # no such collaborator; any other error fails the step, so a refused lookup stays visible.
+          if ! permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$COMMENTER/permission" \
+            --jq .permission 2> "$RUNNER_TEMP/permission.err"); then
+            cat "$RUNNER_TEMP/permission.err" >&2
+            grep -q 'HTTP 404' "$RUNNER_TEMP/permission.err"
+            permission=none
+          fi
+          if [ "$permission" != admin ] && [ "$permission" != write ]; then
+            echo "Write access is not confirmed for the commenter, and the action refuses those mentions. No note."
+            exit 0
+          fi
+          run_path="/actions/runs/$GITHUB_RUN_ID"
+          job_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY$run_path"
+          if [[ "$JOB_ID" =~ ^[0-9]+$ ]]; then job_url="$job_url/job/$JOB_ID"; fi
+          # This run's claude[bot] tracking comment: an issue comment, or a reply in a review thread.
+          # Each list is its own assignment, so a failed call stops the step before any note.
+          issue_comments=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments")
+          review_comments=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments")
+          tracking=$(jq -sc --arg run "$run_path" '[.[][] | select(.user.login == "claude[bot]" and
+              ((.body // "") | test($run + "([^0-9]|$)")))] | last // empty' <<< "$issue_comments$review_comments")
+          if [ -n "$tracking" ] && ! jq -e '.body | test("Claude Code is working")' <<< "$tracking" > /dev/null; then
+            echo "The action already ended its tracking comment."
+            exit 0
+          fi
+          if [ "$REVIEW_RESULT" = cancelled ]; then outcome="was cancelled"; else outcome="failed"; fi
+          body="Claude could not answer [this mention]($MENTION_URL): the run $outcome. [View the failed job]($job_url)"
+          if [ -n "$tracking" ]; then
+            body="$body"$'\n\n'"[Claude's tracking comment]($(jq -r .html_url <<< "$tracking")) will not update."
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" > /dev/null

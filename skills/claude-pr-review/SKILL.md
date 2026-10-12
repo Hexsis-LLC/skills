@@ -10,7 +10,8 @@ The Hexsis method for automated Claude pull-request review. The pull request is 
 What the setup does:
 
 - **Automatic review** of ready, same-repository pull requests. A workflow step writes the diff as line-oriented files. Read-only `diff-reviewer` sub-agents read every source chunk in parallel, a `rules-reviewer` checks the change against the repository's rules, and a fresh `finding-validator` confirms each candidate finding. Claude then submits exactly one formal review on the head commit.
-- **`@claude` mentions** on pull requests from users with write access, answered inline. Mentions cannot submit a verdict.
+- **`@claude` mentions** on pull requests from users with write access, answered inline, on public and private repositories. Mentions cannot submit a verdict.
+- **Tracking comments.** Each automatic review posts a `github-actions` comment that says Claude is reviewing, and a later job edits it to say the review finished, failed, was cancelled, or was skipped, with a link to the review job. A mention gets the action's own `claude[bot]` tracking comment. If a mention fails or is cancelled while that comment still says "working", a `github-actions` note links the failed job.
 - **An informational job summary** of turns, denied tool calls, sub-agents, the diff lines and files read, and the review the run left. It never fails the job or dismisses a review: coverage is reported, not enforced, and the verdict is advisory.
 
 ## Files
@@ -22,13 +23,13 @@ What the setup does:
 | [`templates/check-workflow-policy.mjs`](templates/check-workflow-policy.mjs) | `scripts/check-workflow-policy.mjs` | Enforces the secret and permission boundary in CI |
 | `templates/*.test.mjs` | `scripts/*.test.mjs` | `node:test` suites for both scripts |
 
-The scripts need Node.js 22 or later and no dependencies. Search the templates for `PARAMETER` to find each repo-specific choice.
+The scripts need Node.js 22 or later and no dependencies. They go in `scripts/` unless that directory feeds a build; see [Choose the script directory](#choose-the-script-directory). Search the templates for `PARAMETER` to find each repo-specific choice.
 
 ## Parameters
 
 | Parameter | Default | Where it lives |
 | --- | --- | --- |
-| Runner label | `ubuntu-latest` | `runs-on`. A self-hosted label also goes in `.github/actionlint.yaml` under `self-hosted-runner.labels`. The runner needs `sudo` apt access and Docker, or bubblewrap and the MCP image baked in. |
+| Runner label | `ubuntu-latest` | `runs-on` in jobs `review`, `track`, and `report`. A self-hosted label also goes in `.github/actionlint.yaml` under `self-hosted-runner.labels`. The runner needs `sudo` apt access and Docker, or bubblewrap and the MCP image baked in. |
 | Model | `claude-sonnet-5-5` | `--model` in `claude_args` |
 | Review rules location | `AGENTS.md, CLAUDE.md` | `REVIEW_RULES` in the job env. Read from the default branch's copy, plus the nearest same-named file above each changed path. |
 | Trigger set | automatic review and `@claude` mentions | `on:`, the job `if:`, and `trigger_phrase` |
@@ -38,7 +39,7 @@ The scripts need Node.js 22 or later and no dependencies. Search the templates f
 | Chunk size | 800 diff lines | `defaultChunkLines` in the script |
 | Max turns, timeout | 100 turns, 30 minutes | `--max-turns`, `timeout-minutes`. Sub-agent turns do not count toward max turns. |
 | Transcript retention | 7 days | the upload step. On a public repository, anyone can download the transcript. |
-| Script directory | `scripts/` | the two `node "$RUNNER_TEMP/trusted-rules/scripts/..."` lines, and the policy check's default root |
+| Script directory | `scripts/`, or `.github/scripts/` when `scripts/` feeds a build | every reference listed in [Choose the script directory](#choose-the-script-directory) |
 
 ## Set Up
 
@@ -52,8 +53,18 @@ Read, don't assume:
 - branch protection and rulesets on the default branch, especially required-review rules;
 - whether any workflow uses `secrets: inherit` or `toJSON(secrets)`. The policy check blocks both, because they would hand the review secret to another workflow;
 - the docs-governance markers (see [Docs-governance mode](#docs-governance-mode)).
+- whether anything builds from `scripts/`: a Dockerfile `COPY`, an image recipe, a packaging list, or a hash or digest computed over the directory. If so, the review scripts go in `.github/scripts/` (see [Choose the script directory](#choose-the-script-directory)).
 
 Then show the user the parameter table with the values you chose, and get their confirmation. **Done when** every parameter has a value the user has seen.
+
+#### Choose the script directory
+
+The scripts default to `scripts/`. Some repositories copy or hash `scripts/` into a build artifact, such as a container image or a runner-image recipe digest. Review scripts there would land in that artifact and change its digest on every review-script edit. Search the repository for `scripts/` in Dockerfiles, build files, and workflows before you choose. If `scripts/` feeds a build, use `.github/scripts/` and set every reference to it:
+
+- the two `node "$RUNNER_TEMP/trusted-rules/scripts/claude-review-gate.mjs"` lines in the workflow, in `Fetch pull-request context` and `Summarize review`;
+- the `scripts/check-workflow-policy.mjs` path in the workflow's header comment;
+- the test and policy commands in the CI workflow (step 3);
+- the policy check's default root, `new URL('..', import.meta.url)`, which assumes the script sits one directory below the repository root. From `.github/scripts/` it is `new URL('../..', import.meta.url)`.
 
 ### 2. Resolve the pins
 
@@ -61,7 +72,7 @@ The template pins every action by commit SHA. Re-resolve each pin rather than tr
 
 1. **Claude action.** Take the latest release with `gh release list -R anthropics/claude-code-action`, then get its commit with `gh api repos/anthropics/claude-code-action/commits/<tag> --jq .sha`.
 2. **GitHub MCP image.** At that SHA, read the image tag from `src/mcp/install-mcp-server.ts`. Get its digest with `docker buildx imagetools inspect ghcr.io/github/github-mcp-server:<tag>`. Update `TAG` and `DIGEST` in the `Pull GitHub MCP server` step.
-3. **Built-in sub-agent types.** At that SHA, `base-action/action.yml` names the bundled Claude Code version. List that version's built-in sub-agent types from the Claude Code sub-agents docs. Put each type as `Agent(<type>)` in `DENIED_TOOLS` and in `builtInAgents` in the policy check.
+3. **Built-in sub-agent types.** At that SHA, `base-action/action.yml` names the bundled Claude Code version. List that version's built-in sub-agent types from the Claude Code sub-agents docs, plus `fork`, which gets the main agent's tools. Put each type as `Agent(<type>)` in `DENIED_TOOLS` and in `builtInAgents` in the policy check.
 4. **Action inputs.** Check the action's `action.yml` at that SHA for every input the template passes. Inputs are renamed across major versions.
 5. **Other actions.** Resolve `actions/checkout`, `actions/setup-node`, and `actions/upload-artifact` to their latest release SHAs.
 
@@ -71,13 +82,13 @@ The template pins every action by commit SHA. Re-resolve each pin rather than tr
 
 Copy the files into place and set every parameter. Keep each security control intact. Before you change one, read [references/security-model.md](references/security-model.md); it explains what each control closes. Keep the review prompt's output contract intact; the job summary quotes the review it finds but checks nothing in it.
 
-Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-policy.test.mjs` and `node scripts/check-workflow-policy.mjs` to the repository's existing CI. Adapt the test fixtures to the repository's own paths when you change the classes.
+Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-policy.test.mjs` and `node scripts/check-workflow-policy.mjs` to the repository's existing CI. Use the script directory you chose in step 1. Adapt the test fixtures to the repository's own paths when you change the classes.
 
 ### 4. Validate locally
 
 Run all of these:
 
-- `actionlint` on the workflow. The template passes with no findings.
+- `actionlint` 1.7.8 or later on the workflow (`docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 .github/workflows/claude-review.yml`). The template passes with no findings. Older versions do not know `job.check_run_id`.
 - The two test suites.
 - The policy check against the repository.
 
@@ -89,7 +100,7 @@ The agent cannot do these. Give them to the user as a checklist:
 
 1. **Install the Claude GitHub App** on the repository: <https://github.com/apps/claude>. It is the identity that posts reviews, through the OIDC token exchange.
 2. **Create the model credential and add it as a repository secret.** For a Claude subscription, run `claude setup-token` and save the result as `CLAUDE_CODE_OAUTH_TOKEN`. For an API key, save it as `ANTHROPIC_API_KEY`. The OAuth token lasts a year, and deleting the secret does not revoke it.
-3. **Merge the setup pull request without its own review.** The token exchange refuses a workflow that differs from the default branch's copy. So the setup PR, and every later PR that edits the workflow, gets no Claude review by design: the job passes, and its summary warns that the action skipped Claude. A human reviews those.
+3. **Merge the setup pull request without its own review.** On the setup PR, the `Claude review` job fails at `Fetch pull-request context` with `MODULE_NOT_FOUND`: that step runs the gate script from the default branch's copy, and the script is not there until the PR merges. Its tracking comment then says the review failed. This is expected and harmless. After the merge, every later PR that edits the workflow also gets no Claude review, by design: the token exchange refuses a workflow that differs from the default branch's copy, so the job passes and its summary warns that the action skipped Claude. A human reviews those PRs.
 4. **Decide whether a `claude[bot]` approval counts** toward any required-review rule. The safe default is that it does not, and merging stays human.
 
 If the user runs `/install-github-app` instead, keep the app and the secret it creates. Discard its generated workflow in favor of this one.
@@ -102,7 +113,9 @@ After the setup is merged, open a small same-repository PR that changes one sour
 - [ ] The job summary shows zero denied tool calls, one `diff-reviewer` per chunk, and `Source files read in full: N of N`.
 - [ ] `claude[bot]` posts exactly one review on the head commit: `REQUEST_CHANGES`, with the planted defect as its own inline comment, following the [output contract](#review-output-contract).
 - [ ] A follow-up push that fixes the defect re-runs the review and yields `APPROVE`. A run still in progress for the older commit is cancelled.
-- [ ] A PR comment with `@claude <question>` from a write-access user gets an inline reply and no verdict.
+- [ ] A `github-actions` comment says Claude is reviewing the head commit, and ends as finished with a link to the review job.
+- [ ] A PR comment with `@claude <question>` from a write-access user gets an inline reply and no verdict, and `claude[bot]`'s tracking comment ends in a finished state. On a private repository, the `Run Claude` log shows `Successfully checked out PR branch`.
+- [ ] Optional: cancel a review run by hand. Its tracking comment says the review was cancelled and links the job.
 - [ ] A draft PR and a fork PR are skipped.
 - [ ] The transcript artifact downloads.
 
@@ -149,5 +162,5 @@ A change that contradicts current authority is a **Rules** finding that cites th
 
 ## References
 
-- [references/security-model.md](references/security-model.md): read before changing any control, and when a user asks why the workflow is shaped this way. It covers least privilege, untrusted content, forks, mention triggers, secrets and OIDC, no shell, read-only sub-agents, why coverage is reported but not enforced, and residual risks.
+- [references/security-model.md](references/security-model.md): read before changing any control, and when a user asks why the workflow is shaped this way. It covers least privilege, untrusted content, forks, mention triggers, the private-repository mention fetch, tracking comments, secrets and OIDC, no shell, read-only sub-agents, why coverage is reported but not enforced, and residual risks.
 - [references/troubleshooting.md](references/troubleshooting.md): read when a run fails, ends early, posts nothing, or reads too little.

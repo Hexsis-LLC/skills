@@ -44,7 +44,7 @@ jobs:
       DENIED_TOOLS: >-
         Edit,Write,Bash,Workflow,
         Agent(general-purpose),Agent(claude),Agent(Explore),Agent(Plan),
-        Agent(statusline-setup),Agent(claude-code-guide),
+        Agent(statusline-setup),Agent(claude-code-guide),Agent(fork),
         mcp__github__merge_pull_request
       REVIEW_AGENTS: >-
         {"diff-reviewer": {"description": "Reads a diff range.",
@@ -54,7 +54,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: anthropics/claude-code-action@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243
+      - uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        env:
+          GIT_CONFIG_COUNT: \${{ github.event_name == 'pull_request' && '0' || '1' }}
+          GIT_CONFIG_KEY_0: credential.https://github.com.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
         with:
           claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
@@ -110,7 +114,7 @@ test('the review exception does not widen to other scopes, secrets, jobs, or wor
     ['claude-review.yml', review.replace('CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'), /may read a secret/],
     ['claude-review.yml', review.replace('secrets.CLAUDE_CODE_OAUTH_TOKEN', "secrets['CLAUDE_CODE_OAUTH_TOKEN']"), /may read a secret/],
     ['claude-review.yml', review.replace('secrets.CLAUDE_CODE_OAUTH_TOKEN', 'Secrets.CLAUDE_CODE_OAUTH_TOKEN'), /may read a secret/],
-    ['claude-review.yml', review.replace('@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243', '@v1'), /may read a secret/],
+    ['claude-review.yml', review.replace('@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248', '@v1'), /may read a secret/],
     ['claude-review.yml', `${review}${otherJob}`, /write permissions/],
     ['claude-review.yml', `${review}${otherJob.replace('      - run: echo ok', '      - run: echo ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}')}`, /may read a secret/],
     ['claude-review.yml', review.replace('  review:\n', '  reviewer:\n'), /write permissions/],
@@ -167,6 +171,7 @@ test('reviewer sub-agents stay read-only and built-in sub-agent types stay denie
   const cases = [
     [review.replace('Agent(general-purpose),', ''), /must deny Agent\(general-purpose\) in DENIED_TOOLS/],
     [review.replace('Agent(claude),', ''), /must deny Agent\(claude\) in DENIED_TOOLS/],
+    [review.replace(',Agent(fork)', ''), /must deny Agent\(fork\) in DENIED_TOOLS/],
     [review.replace('Bash,Workflow,', 'Bash,'), /must deny Workflow in DENIED_TOOLS/],
     [review.replace('"tools": ["Read", "Grep", "mcp__github__get_file_contents"], ', ''),
       /sub-agent diff-reviewer must list only read tools/],
@@ -186,6 +191,105 @@ test('reviewer sub-agents stay read-only and built-in sub-agent types stay denie
     const result = run(t, { '.github/workflows/claude-review.yml': text });
     // Then it rejects the widened sub-agent boundary.
     assert.equal(result.status, 1, text);
+    assert.match(result.stderr, message);
+  }
+});
+
+test('git credentials stay out of the checkout', (t) => {
+  // Given review workflows that put an expression in the env-only git config, or persist a
+  // credential in the checkout's git config.
+  const cases = [
+    [review.replace('"password=$GITHUB_TOKEN"', '"password=\${{ github.token }}"'),
+      /claude-review\.yml:38: GIT_CONFIG_VALUE_0 must be literal/],
+    [review.replace('credential.https://github.com.helper', "\${{ 'http.extraheader' }}"),
+      /GIT_CONFIG_KEY_0 must be literal/],
+    [review.replace('    steps:\n', '    steps:\n      - run: |\n          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $T"\n'),
+      /run steps must not persist a git credential/],
+    [review.replace('    steps:\n', '    steps:\n      - run: git config --global credential.helper store\n'),
+      /run steps must not persist a git credential/],
+  ];
+  for (const [text, message] of cases) {
+    // When the policy check reads each one.
+    const result = run(t, { '.github/workflows/claude-review.yml': text });
+    // Then it rejects the credential.
+    assert.equal(result.status, 1, text);
+    assert.match(result.stderr, message);
+  }
+});
+
+test('run steps take values through env, not expressions', (t) => {
+  // Given a review workflow whose run script pastes an expression into the shell.
+  const text = review.replace('    steps:\n',
+    '    steps:\n      - run: |\n          echo "\${{ github.event.comment.body }}"\n');
+  // When the policy check reads it.
+  const result = run(t, { '.github/workflows/claude-review.yml': text });
+  // Then it rejects the run step.
+  assert.equal(result.status, 1, text);
+  assert.match(result.stderr, /run steps must take values through env/);
+});
+
+// The tracking-comment jobs: pull-requests: write, and only bash run steps.
+const trackingJobs = `  track:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=working
+        env:
+          GH_TOKEN: \${{ github.token }}
+  report:
+    needs: [track, review]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" -f body=done
+`;
+
+test('tracking jobs hold only pull-requests: write and run only bash steps', (t) => {
+  // Given the review workflow with its tracking jobs.
+  // When the policy check reads it.
+  const passing = run(t, { '.github/workflows/claude-review.yml': `${review}${trackingJobs}` });
+  // Then it passes.
+  assert.equal(passing.status, 0, passing.stderr);
+
+  // Given tracking jobs that widen their scope, use an action, a container, or services, run
+  // another shell, read a secret, or a job that borrows their scope under another name.
+  const cases = [
+    [trackingJobs.replace('      pull-requests: write\n    defaults:',
+      '      pull-requests: write\n      contents: write\n    defaults:'),
+      /write permissions are not allowed|job track must hold exactly pull-requests: write/],
+    [trackingJobs.replace('    needs: [track, review]\n    runs-on: ubuntu-latest\n    permissions:\n      pull-requests: write\n',
+      '    needs: [track, review]\n    runs-on: ubuntu-latest\n    permissions:\n      pull-requests: write\n      issues: read\n'),
+      /job report must hold exactly pull-requests: write/],
+    [trackingJobs.replace('    steps:\n      - run: gh api -X',
+      '    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n' +
+      '          persist-credentials: false\n      - run: gh api -X'),
+      /job report may only run shell steps/],
+    [trackingJobs.replace('\${{ github.token }}', '\${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}'), /may read a secret/],
+    [trackingJobs.replace('  report:\n', '  notify:\n'), /write permissions are not allowed/],
+    [trackingJobs.replace('  report:\n    needs: [track, review]\n',
+      '  report:\n    needs: [track, review]\n    container: node:24\n'), /job report must not set container/],
+    [trackingJobs.replace('  track:\n', '  track:\n    services:\n      cache:\n        image: redis\n'),
+      /job track must not set services/],
+    [trackingJobs.replace('        shell: bash\n    steps:\n      - run: gh api -X', '        shell: sh\n    steps:\n      - run: gh api -X'),
+      /job report must run its steps with shell: bash/],
+    [trackingJobs.replace('    defaults:\n      run:\n        shell: bash\n    steps:\n      - run: gh api "',
+      '    steps:\n      - run: gh api "'), /job track must run its steps with shell: bash/],
+    [trackingJobs.replace('      - run: gh api -X', '      - shell: python\n        run: gh api -X'),
+      /job report must run its steps with shell: bash/],
+  ];
+  for (const [jobs, message] of cases) {
+    // When the policy check reads each one.
+    const result = run(t, { '.github/workflows/claude-review.yml': `${review}${jobs}` });
+    // Then it rejects the tracking jobs.
+    assert.equal(result.status, 1, jobs);
     assert.match(result.stderr, message);
   }
 });
