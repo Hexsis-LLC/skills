@@ -71,7 +71,7 @@ The template pins every action by commit SHA. Re-resolve each pin rather than tr
 
 1. **Claude action.** Take the latest release with `gh release list -R anthropics/claude-code-action`, then get its commit with `gh api repos/anthropics/claude-code-action/commits/<tag> --jq .sha`.
 2. **GitHub MCP image.** At that SHA, read the image tag from `src/mcp/install-mcp-server.ts`. Get its digest with `docker buildx imagetools inspect ghcr.io/github/github-mcp-server:<tag>`. Update `TAG` and `DIGEST` in the `Pull GitHub MCP server` step.
-3. **Built-in sub-agent types.** At that SHA, `base-action/action.yml` names the bundled Claude Code version. List that version's built-in sub-agent types from the Claude Code sub-agents docs. Put each type as `Agent(<type>)` in `DENIED_TOOLS` and in `builtInAgents` in the policy check.
+3. **Built-in sub-agent types.** At that SHA, `base-action/action.yml` names the bundled Claude Code version. List that version's built-in sub-agent types from the Claude Code sub-agents docs, plus `fork`, which gets the main agent's tools. Put each type as `Agent(<type>)` in `DENIED_TOOLS` and in `builtInAgents` in the policy check.
 4. **Action inputs.** Check the action's `action.yml` at that SHA for every input the template passes. Inputs are renamed across major versions.
 5. **Other actions.** Resolve `actions/checkout`, `actions/setup-node`, and `actions/upload-artifact` to their latest release SHAs.
 

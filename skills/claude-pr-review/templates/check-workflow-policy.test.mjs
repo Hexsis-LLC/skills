@@ -44,7 +44,7 @@ jobs:
       DENIED_TOOLS: >-
         Edit,Write,Bash,Workflow,
         Agent(general-purpose),Agent(claude),Agent(Explore),Agent(Plan),
-        Agent(statusline-setup),Agent(claude-code-guide),
+        Agent(statusline-setup),Agent(claude-code-guide),Agent(fork),
         mcp__github__merge_pull_request
       REVIEW_AGENTS: >-
         {"diff-reviewer": {"description": "Reads a diff range.",
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: anthropics/claude-code-action@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243
+      - uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
           claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
@@ -110,7 +110,7 @@ test('the review exception does not widen to other scopes, secrets, jobs, or wor
     ['claude-review.yml', review.replace('CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'), /may read a secret/],
     ['claude-review.yml', review.replace('secrets.CLAUDE_CODE_OAUTH_TOKEN', "secrets['CLAUDE_CODE_OAUTH_TOKEN']"), /may read a secret/],
     ['claude-review.yml', review.replace('secrets.CLAUDE_CODE_OAUTH_TOKEN', 'Secrets.CLAUDE_CODE_OAUTH_TOKEN'), /may read a secret/],
-    ['claude-review.yml', review.replace('@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243', '@v1'), /may read a secret/],
+    ['claude-review.yml', review.replace('@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248', '@v1'), /may read a secret/],
     ['claude-review.yml', `${review}${otherJob}`, /write permissions/],
     ['claude-review.yml', `${review}${otherJob.replace('      - run: echo ok', '      - run: echo ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}')}`, /may read a secret/],
     ['claude-review.yml', review.replace('  review:\n', '  reviewer:\n'), /write permissions/],
@@ -167,6 +167,7 @@ test('reviewer sub-agents stay read-only and built-in sub-agent types stay denie
   const cases = [
     [review.replace('Agent(general-purpose),', ''), /must deny Agent\(general-purpose\) in DENIED_TOOLS/],
     [review.replace('Agent(claude),', ''), /must deny Agent\(claude\) in DENIED_TOOLS/],
+    [review.replace(',Agent(fork)', ''), /must deny Agent\(fork\) in DENIED_TOOLS/],
     [review.replace('Bash,Workflow,', 'Bash,'), /must deny Workflow in DENIED_TOOLS/],
     [review.replace('"tools": ["Read", "Grep", "mcp__github__get_file_contents"], ', ''),
       /sub-agent diff-reviewer must list only read tools/],

@@ -13,8 +13,9 @@ const reviewSecret = 'CLAUDE_CODE_OAUTH_TOKEN';
 const reviewTokenInput = 'claude_code_oauth_token';
 // Built-in sub-agent types of the Claude Code version the pinned action bundles. Re-check this list
 // whenever the action pin changes: a new built-in type would otherwise run unlisted.
+// `fork` is not a built-in type, but a fork gets the main agent's tools, so it stays denied too.
 const builtInAgents = ['general-purpose', 'claude', 'Explore', 'Plan', 'statusline-setup',
-  'claude-code-guide'];
+  'claude-code-guide', 'fork'];
 
 // Claude posts reviews with its app token, so the job token needs no pull-requests: write.
 const reviewWriteScopes = new Set(['issues', 'id-token']);

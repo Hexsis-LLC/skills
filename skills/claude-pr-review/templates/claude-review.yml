@@ -64,6 +64,9 @@ jobs:
       # Remove every built-in sub-agent type, so only the read-only types in REVIEW_AGENTS exist.
       # DENIED_TOOLS still names each built-in type, in case this variable stops applying.
       CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: '1'
+      # Keep fork mode off. A fork gets the main agent's tools, review tools included.
+      # DENIED_TOOLS also denies Agent(fork).
+      CLAUDE_CODE_FORK_SUBAGENT: '0'
       # Native GitHub tools only; Claude has no Bash. Automatic review reads the change through
       # the read-only sub-agents in REVIEW_AGENTS and submits one formal review with inline
       # findings. Mentions read and comment inline, but cannot submit a verdict or start
@@ -88,7 +91,7 @@ jobs:
       DENIED_TOOLS: >-
         Edit,MultiEdit,Write,NotebookEdit,Bash,Workflow,
         Agent(general-purpose),Agent(claude),Agent(Explore),Agent(Plan),
-        Agent(statusline-setup),Agent(claude-code-guide),
+        Agent(statusline-setup),Agent(claude-code-guide),Agent(fork),
         mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,
         mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log,
         mcp__github__merge_pull_request,mcp__github__update_pull_request,
@@ -244,7 +247,7 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc true
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
       # Write the change as line-oriented files outside the checkout. Claude pages them with
@@ -291,7 +294,7 @@ jobs:
           docker tag "$IMAGE@$DIGEST" "$IMAGE:$TAG"
       - name: Run Claude
         id: claude
-        uses: anthropics/claude-code-action@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
           # PARAMETER: auth. For an API key, swap this input for anthropic_api_key with the
           # ANTHROPIC_API_KEY secret, and update both names in the policy check.
@@ -347,7 +350,7 @@ jobs:
       # PARAMETER: transcript retention.
       - name: Upload Claude transcript
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: claude-review-transcript-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/claude-execution-output.json
