@@ -88,7 +88,7 @@ Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-poli
 
 Run all of these:
 
-- `actionlint` 1.7.12 or later on the workflow (`docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 .github/workflows/claude-review.yml`). The template passes with no findings. Older versions do not know `job.check_run_id`.
+- `actionlint` 1.7.8 or later on the workflow (`docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 .github/workflows/claude-review.yml`). The template passes with no findings. Older versions do not know `job.check_run_id`.
 - The two test suites.
 - The policy check against the repository.
 

@@ -6,7 +6,9 @@ The threat: the pull request is **untrusted input** that steers an agent holding
 
 ## Least privilege
 
-- **Workflow default `contents: read`.** Only job `review` gets more: `id-token: write` for the OIDC token exchange, `issues: write`, and `pull-requests: read` for the context and summary steps. Claude posts reviews and comments with its app token. The job's `GITHUB_TOKEN` submits and dismisses no review, so the policy check rejects `pull-requests: write` there. No `actions: read`, so tag mode cannot install the CI-log tools. The tracking-comment jobs `track` and `report` hold `pull-requests: write` and nothing else; see [Tracking comments](#tracking-comments).
+- **Workflow default `contents: read`.** Three jobs get more, each with a fixed set of scopes that the policy check enforces:
+  - Job `review` gets `id-token: write` for the OIDC token exchange, `issues: write`, and `pull-requests: read` for the context and summary steps. Claude posts reviews and comments with its app token. This job's `GITHUB_TOKEN` submits and dismisses no review, so the policy check rejects `pull-requests: write` here. No `actions: read`, so tag mode cannot install the CI-log tools.
+  - The tracking-comment jobs `track` and `report` get exactly `pull-requests: write` and nothing else; see [Tracking comments](#tracking-comments).
 - **App token downgraded.** The Claude GitHub App token defaults to `contents: write`. `additional_permissions: contents: read` caps it, so a prompt-injected run cannot push or merge even if a tool limit fails. GitHub enforces this, not the model.
 - **`persist-credentials: false`** on checkout keeps the job token out of `.git/config`.
 - **Pin every action by commit SHA.** A tag can move; a SHA cannot. An action update is a reviewed change to the pin.
