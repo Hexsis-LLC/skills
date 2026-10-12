@@ -52,6 +52,21 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 **Cause:** `Fetch pull-request context` runs `claude-review-gate.mjs` from `$RUNNER_TEMP/trusted-rules`, the default branch's copy. On the first setup PR the script is not on the default branch yet, so Node cannot find it and the job fails before Claude starts.
 **Expected.** It is harmless: a human reviews the setup PR, and the job works once the PR merges. Later PRs that edit the workflow get the skip described above and pass. If the failure persists after the merge, check that the script directory in the two `node` lines matches where the scripts live on the default branch.
 
+## A mention fails before Claude starts on a private repository
+
+**Cause:** the action runs `git fetch origin <head branch>` before it sets any git credentials, and the checkout keeps none (`persist-credentials: false`). A private repository refuses the anonymous fetch, prepare throws, and `claude[bot]`'s comment stays at "Claude Code is working…".
+**Fix:** keep the credential helper in the `Run Claude` step's `env` (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0`, `GIT_CONFIG_VALUE_0`). It answers the fetch with the action's own read-only token. Do not set `persist-credentials: true` or write a token with `git config`; the policy check blocks both. See [security-model.md](security-model.md#private-repositories-the-mention-fetch).
+
+## A tracking comment still says "working"
+
+**Cause:** the action ends its `claude[bot]` comment only after its prepare phase, so a run that fails or is cancelled earlier leaves it stuck.
+**Expected.** Job `report` posts a `github-actions` note that links the failed job and the stuck comment, for commenters with write access. If no note appears, read job `report`'s log: it says when write access was not confirmed, and it fails when a GitHub API call fails. For automatic review, `report` edits the `github-actions` tracking comment itself; if that comment never ends, check that `report` ran.
+
+## Commenting fails with `Resource not accessible by integration`
+
+**Cause:** the job token needs `pull-requests: write` to comment on a pull request; `issues: write` is not enough.
+**Fix:** keep the comments in jobs `track` and `report`, which hold only `pull-requests: write`. Never give job `review` that scope: its token could then submit or dismiss reviews.
+
 ## A mention was ignored during a burst of comments
 
 **Cause:** GitHub keeps only the newest pending run in a concurrency group, so a shared per-PR group drops older mentions.

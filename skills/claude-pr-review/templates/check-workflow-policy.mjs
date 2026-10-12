@@ -19,6 +19,11 @@ const builtInAgents = ['general-purpose', 'claude', 'Explore', 'Plan', 'statusli
 
 // Claude posts reviews with its app token, so the job token needs no pull-requests: write.
 const reviewWriteScopes = new Set(['issues', 'id-token']);
+// Posting github-actions tracking comments on a pull request needs pull-requests: write, which job
+// review must not hold. Only these jobs may, and each may hold nothing else and only run bash
+// steps: no actions, checkout, container, services, or secrets.
+const trackingJobs = ['track', 'report'];
+const trackingScope = 'pull-requests';
 const reviewAction = /^anthropics\/claude-code-action@[0-9a-f]{40}$/;
 const reviewTokenValue = `\${{ secrets.${reviewSecret} }}`;
 // The reviewer may approve, so its app token must stay unable to push or merge, the merge tool and
@@ -251,6 +256,63 @@ function checkCheckouts(file, steps, errors) {
   }
 }
 
+// Claude's file tools can reach the checkout, so no git credential may be persisted there. Git
+// config passed through the environment stays literal, so a credential helper reads its token from
+// the environment at auth time and no expression can write a token into the config. Run steps may
+// not write a credential or auth header with `git config`; a one-shot `git -c` is fine.
+const gitConfigEnv = /^GIT_CONFIG_(?:KEY_\d+|VALUE_\d+|PARAMETERS)$/;
+const persistedGitCredential = /\bgit\b[^\n]*\bconfig\b[^\n]*\b(?:extraheader|credential)/i;
+
+function checkGitCredentials(file, workflow, errors) {
+  walk(workflow, (key, child) => {
+    if (key === 'env' && isMapping(child)) {
+      for (const [name, value] of Object.entries(child)) {
+        if (gitConfigEnv.test(name) && typeof value === 'string' && value.includes('${{')) {
+          errors.push(`${file}:${keyLines.get(child)[name]}: ${name} must be literal; a credential helper reads ` +
+            'its token from the environment');
+        }
+      }
+    }
+    if (key === 'run' && typeof child === 'string' && persistedGitCredential.test(child)) {
+      errors.push(`${file}: run steps must not persist a git credential with git config`);
+    }
+  });
+}
+
+function checkTrackingJobs(file, jobs, errors) {
+  for (const id of trackingJobs.filter((name) => isMapping(jobs[name]))) {
+    const job = jobs[id];
+    const permissions = job.permissions;
+    if (!isMapping(permissions) || Object.keys(permissions).join() !== trackingScope ||
+      permissions[trackingScope] !== 'write') {
+      errors.push(`${file}: job ${id} must hold exactly ${trackingScope}: write`);
+    }
+    const steps = Array.isArray(job.steps) ? job.steps : [];
+    if (!steps.length || steps.some((step) => !isMapping(step) || step.uses !== undefined ||
+      typeof step.run !== 'string')) {
+      errors.push(`${file}: job ${id} may only run shell steps: no actions or checkout`);
+    }
+    for (const key of ['container', 'services'].filter((name) => job[name] !== undefined)) {
+      errors.push(`${file}: job ${id} must not set ${key}`);
+    }
+    // bash runs with -eo pipefail, so a failed gh api call fails its step instead of hiding.
+    if (job.defaults?.run?.shell !== 'bash' ||
+      steps.some((step) => isMapping(step) && step.shell !== undefined && step.shell !== 'bash')) {
+      errors.push(`${file}: job ${id} must run its steps with shell: bash`);
+    }
+  }
+}
+
+// Pull-request and comment text is untrusted. An expression inside a run script is pasted into the
+// shell before it runs, so run steps take every value through env instead.
+function checkRunScripts(file, workflow, errors) {
+  walk(workflow, (key, child) => {
+    if (key === 'run' && typeof child === 'string' && child.includes('${{')) {
+      errors.push(`${file}: run steps must take values through env, not \${{ }} expressions`);
+    }
+  });
+}
+
 function reviewGrant(workflow) {
   if (!isMapping(workflow) || !isMapping(workflow.jobs)) return null;
   const job = workflow.jobs[reviewJob];
@@ -344,8 +406,9 @@ function checkReviewWorkflow(file, text, errors) {
   walk(workflow, (key, child) => {
     if (key === 'secrets') errors.push(`${file}: secrets keys are not allowed`);
     if (key !== 'permissions') return;
-    const reviewScope = (scope, level) =>
-      level === 'write' && child === grant?.permissions && reviewWriteScopes.has(scope);
+    const reviewScope = (scope, level) => level === 'write' &&
+      ((child === grant?.permissions && reviewWriteScopes.has(scope)) ||
+        (trackingJobs.some((id) => child === workflow.jobs?.[id]?.permissions) && scope === trackingScope));
     const readOnly = isMapping(child)
       ? Object.entries(child).every(([scope, level]) =>
         level === 'read' || level === 'none' || reviewScope(scope, level))
@@ -362,6 +425,9 @@ function checkReviewWorkflow(file, text, errors) {
     }
     if (isMapping(job)) checkCheckouts(file, job.steps, errors);
   }
+  checkGitCredentials(file, workflow, errors);
+  checkTrackingJobs(file, workflow.jobs, errors);
+  checkRunScripts(file, workflow, errors);
   if (grant?.tokenSteps.length) checkReviewTools(file, grant, errors);
 }
 

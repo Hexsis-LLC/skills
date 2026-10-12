@@ -6,7 +6,7 @@ The threat: the pull request is **untrusted input** that steers an agent holding
 
 ## Least privilege
 
-- **Workflow default `contents: read`.** Only job `review` gets more: `id-token: write` for the OIDC token exchange, `issues: write`, and `pull-requests: read` for the context and summary steps. Claude posts reviews and comments with its app token. The job's `GITHUB_TOKEN` submits and dismisses no review, so the policy check rejects `pull-requests: write`. No `actions: read`, so tag mode cannot install the CI-log tools.
+- **Workflow default `contents: read`.** Only job `review` gets more: `id-token: write` for the OIDC token exchange, `issues: write`, and `pull-requests: read` for the context and summary steps. Claude posts reviews and comments with its app token. The job's `GITHUB_TOKEN` submits and dismisses no review, so the policy check rejects `pull-requests: write` there. No `actions: read`, so tag mode cannot install the CI-log tools. The tracking-comment jobs `track` and `report` hold `pull-requests: write` and nothing else; see [Tracking comments](#tracking-comments).
 - **App token downgraded.** The Claude GitHub App token defaults to `contents: write`. `additional_permissions: contents: read` caps it, so a prompt-injected run cannot push or merge even if a tool limit fails. GitHub enforces this, not the model.
 - **`persist-credentials: false`** on checkout keeps the job token out of `.git/config`.
 - **Pin every action by commit SHA.** A tag can move; a SHA cannot. An action update is a reviewed change to the pin.
@@ -25,6 +25,37 @@ The threat: the pull request is **untrusted input** that steers an agent holding
 ## Who may trigger a mention
 
 The action rejects actors without write access by default. Keep `allowed_non_write_users` unset and `allowed_bots` empty. A write-access user is already trusted to push workflows, so a mention from them adds no new reach. Each mention gets its own concurrency group, so a burst of mentions is answered rather than dropped.
+
+## Private repositories: the mention fetch
+
+For `issue_comment`, GitHub runs the default branch's workflow, which checks out the default branch with `persist-credentials: false`. In tag mode the action then runs `git fetch origin <head branch>` in `setupBranch` (`src/github/operations/branch.ts` at v1.0.248) before it sets any git credentials. A public repository answers that fetch anonymously. A private one refuses it, and the mention fails before Claude starts.
+
+Pre-fetching the ref does not help, because the action's fetch is unconditional. The action has no input that gives its own git calls a credential. `allowed_non_write_users` turns on a helper, but it also widens who can trigger a run.
+
+The fix is a git credential helper passed only through the `Run Claude` step's environment, as `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0`, and `GIT_CONFIG_VALUE_0`. It is on for mentions and off (`GIT_CONFIG_COUNT: 0`) for automatic review. Why it holds:
+
+- **No token in config.** The helper's key and value are literal. The helper prints `GITHUB_TOKEN` only when git asks for a password. The action sets that variable to its own app token (`contents: read`) before prepare.
+- **Nothing on disk.** No step writes a token to `.git/config` or a credential store. The action itself, with `use_commit_signing`, writes its token into the origin URL there after prepare. That is existing behavior, and the `Read(./.git/**)` deny keeps it from Claude.
+- **Claude gains nothing.** The action already passes its whole environment, `GITHUB_TOKEN` included, to Claude. Claude still has no `Bash`, and `/proc` stays denied.
+- **The policy check holds the shape.** `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`, and `GIT_CONFIG_PARAMETERS` must be literal, and no run step may write a credential or auth header with `git config`.
+
+## Tracking comments
+
+A mention gets the action's `claude[bot]` tracking comment ("Claude Code is working…"). Automatic review does not, and the action cannot end its own comment when prepare fails: it updates the comment only after prepare returns. Two jobs fill those gaps:
+
+- `track` posts a `github-actions` comment when an automatic review starts, with a link to the run.
+- `report` needs `track` and `review`, runs on `always()` unless `review` was skipped, and edits that comment with the review's result and a link to the review job. When a mention fails or is cancelled while `claude[bot]`'s comment still says "working", it posts a note that links the mention, the failed job, and the stuck comment. It posts the note only for commenters with `admin` or `write` permission, because the action refuses everyone else and that refusal also fails the job. A permission lookup that fails with anything but a 404 fails the step, so a refused call stays visible.
+
+Why they are shaped this way:
+
+- **A separate job holds `pull-requests: write`.** Commenting on a pull request with the job token needs it; `issues: write` gets `Resource not accessible by integration`. Job `review` must not hold it, because that token could submit or dismiss reviews. So `track` and `report` hold exactly that scope and run only bash steps: no actions, checkout, container, services, or secrets. They make only `gh api` calls with fixed text and `env` values. The policy check enforces all of this, and bash's `-eo pipefail` makes a failed call fail its step.
+- **No edit of `claude[bot]`'s comment.** Only a comment's author can edit it, the action revokes its app token in its last step, and repeating its OIDC exchange would copy an undocumented API. So a stuck mention gets a new note instead.
+- **No `track_progress`.** It forces tag mode for `pull_request`, whose prompt has Claude post its review into the tracking comment, breaking the one-formal-review contract.
+- **No `actions: read`.** Job `review` outputs `job.check_run_id`, which is its job ID, so the link needs no job listing. When the ID is empty, the link falls back to the run.
+
+## Expressions stay out of run scripts
+
+Pull-request and comment text is untrusted. An expression inside a `run` script is pasted into the shell before it runs, so the policy check rejects any `${{ }}` in a run step. Every step takes its values through `env`.
 
 ## Secrets and OIDC
 
