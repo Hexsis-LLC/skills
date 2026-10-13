@@ -22,6 +22,11 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 **Cause:** a prompt that says "post nothing when you find nothing" makes a failed review and a clean review look the same.
 **Fix:** every automatic review ends with exactly one formal review: `APPROVE` or `REQUEST_CHANGES`. The job summary warns when no review was submitted in this run; the job still passes, so read the summary.
 
+## Green check, "submitted no review", and the transcript says a pending review already exists
+
+**Cause: a cancelled run left a draft review.** To request changes, Claude creates a pending review, adds the inline comments, then submits it. A push between those steps cancels the run (`cancel-in-progress`) and leaves `claude[bot]`'s pending review on the PR. GitHub allows one pending review per account per pull request, so every later run's create and approve calls fail with "this account already has a pending review". Claude cannot list reviews, and only the `claude[bot]` identity can see or delete its pending review; a human token cannot.
+**Fix:** keep the verdict step's call to `mcp__github__delete_pending_pull_request_review` before any review is created, and its rule to delete and retry once when a create call is still rejected. The retry never covers the submit call, which would delete the run's own draft and its inline comments. For an older install, copy the verdict step of the review prompt from the template; the tool is already in `REVIEW_TOOLS`. Do not add `get_pull_request_reviews` or change the concurrency settings. A fresh pull request also works.
+
 ## The review read a fraction of the diff
 
 **Cause:** a reviewer's account of what it read is a claim. One unchecked reviewer approved after reading about a quarter of the diff lines and none of most source files, and cited the PR body's "tests pass" as evidence.
