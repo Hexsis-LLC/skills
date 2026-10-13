@@ -176,15 +176,17 @@ jobs:
         Verdict: exactly one formal review on HEAD SHA
         7. Never post a separate pull-request comment, and never collect findings into
            one large comment or into the review body.
-           - First, before you create any review, call
+           - Before you create any review, call
              mcp__github__delete_pending_pull_request_review for this pull request. If it
-             reports that there is no pending review, continue. Only this workflow posts as
-             claude[bot], so a pending review is always a stale draft that a cancelled run
-             left behind. Never submit it: GitHub allows one pending review per account, and
-             while it exists every new review is rejected.
-           - If a create or submit call is still rejected because a pending review exists,
-             delete the pending review and retry that call once. If it fails again, stop
-             and say so in your final message.
+             reports that there is no pending review, or fails, continue. Only this
+             workflow posts as claude[bot], so a pending review is always a stale draft
+             that a cancelled run left behind. Never submit it: while it exists, GitHub
+             rejects every new review from this account.
+           - If mcp__github__create_pending_pull_request_review or
+             mcp__github__create_and_submit_pull_request_review is still rejected because
+             a pending review exists, delete the pending review and retry that call once.
+             If it fails again, stop and say so in your final message. Never delete the
+             pending review you created in this run.
            - Confirmed findings: call mcp__github__create_pending_pull_request_review with
              commitID set to HEAD SHA. Add each finding as its own inline comment on its
              diff line with mcp__github__add_comment_to_pending_review (subjectType LINE;

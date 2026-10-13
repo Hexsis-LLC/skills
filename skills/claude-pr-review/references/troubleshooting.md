@@ -25,7 +25,7 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 ## Green check, "submitted no review", and the transcript says a pending review already exists
 
 **Cause: a cancelled run left a draft review.** To request changes, Claude creates a pending review, adds the inline comments, then submits it. A push between those steps cancels the run (`cancel-in-progress`) and leaves `claude[bot]`'s pending review on the PR. GitHub allows one pending review per account per pull request, so every later run's create and approve calls fail with "this account already has a pending review". Claude cannot list reviews, and only the `claude[bot]` identity can see or delete its pending review; a human token cannot.
-**Fix:** the template's prompt now calls `mcp__github__delete_pending_pull_request_review` before it creates a review, and deletes and retries once if a create or submit is still rejected. For an older install, update the verdict step of the review prompt from the template; the tool is already in `REVIEW_TOOLS`. Do not add `get_pull_request_reviews` or change the concurrency settings. A fresh pull request also works.
+**Fix:** keep the verdict step's call to `mcp__github__delete_pending_pull_request_review` before any review is created, and its rule to delete and retry once when a create call is still rejected. The retry never covers the submit call, which would delete the run's own draft and its inline comments. For an older install, copy the verdict step of the review prompt from the template; the tool is already in `REVIEW_TOOLS`. Do not add `get_pull_request_reviews` or change the concurrency settings. A fresh pull request also works.
 
 ## The review read a fraction of the diff
 
