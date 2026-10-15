@@ -52,7 +52,7 @@ Read, don't assume:
 - the runner the repository already uses;
 - branch protection and rulesets on the default branch, especially required-review rules;
 - whether any workflow uses `secrets: inherit` or `toJSON(secrets)`. The policy check blocks both, because they would hand the review secret to another workflow;
-- the docs-governance markers (see [Docs-governance mode](#docs-governance-mode)).
+- the docs-governance markers: an `AGENTS.md` that routes to the `docs-governance` skill or a decision register (see [Docs-governance mode](#docs-governance-mode)).
 - whether anything builds from `scripts/`: a Dockerfile `COPY`, an image recipe, a packaging list, or a hash or digest computed over the directory. If so, the review scripts go in `.github/scripts/` (see [Choose the script directory](#choose-the-script-directory)).
 
 Then show the user the parameter table with the values you chose, and get their confirmation. **Done when** every parameter has a value the user has seen.
@@ -150,15 +150,16 @@ The prompt in the template carries the full contract. Nothing enforces it: the j
 
 ## Docs-governance mode
 
-Some repositories follow the docs-governance method, where documentation is product authority. The `docs-governance` skill covers that method; this skill does not depend on it. Detect such a repository by an `AGENTS.md` or `CLAUDE.md` that routes to a product-authority document, a decision registry, and a change registry (often `docs/governance/`, `docs/decisions/`, `docs/changes/`).
+Some repositories follow the docs-governance method: docs are the product authority, owner decisions live in one dated register, lasting docs live in `docs/` by kind, and scratch stays in an ignored `.scratch/`. The `docs-governance` skill covers that method; this skill does not depend on it. Detect such a repository by an `AGENTS.md` or `CLAUDE.md` that routes to the `docs-governance` skill or to a decision register (by default `docs/product-decisions.md`) and a docs index (`docs/README.md`).
 
-When you detect it, suggest `REVIEW_GOVERNANCE: 'on'` to the user. With it on, the `rules-reviewer` also does three things:
+When you detect it, suggest `REVIEW_GOVERNANCE: 'on'` to the user. With it on, the `rules-reviewer` also:
 
-- It follows the trusted route to the authority document.
-- It finds the Delivery Ticket the PR implements, from the ticket IDs or issue numbers in the PR title or body, and reads its acceptance.
-- It reads each decision and operations record the ticket, the route, or the changed files rely on.
+- reads the `docs-governance` skill from the trusted copy when the repository vendors it (for example `.agents/skills/docs-governance/SKILL.md`), and the register entries, ADRs and docs the change touches or relies on;
+- checks that the change agrees with every current register decision, that a decision the change records or changes left no contradicting doc unamended (current docs amended, dated records and research given a dated note), that no scratch (working notes, plans, handoffs, one-task specs) is committed, and that a moved or removed doc left no broken link and stayed listed correctly in the index.
 
-A change that contradicts current authority is a **Rules** finding that cites the record ID. Leave the mode off everywhere else.
+A change that breaks one of these is a **Rules** finding that cites the decision's title or the doc's path. Leave the mode off everywhere else.
+
+A repository on the earlier record-based model (`CHG-*` and `DEC-*` record files, a document registry) keeps its own governance docs; the rules reviewer reads them through `AGENTS.md` like any other review rules.
 
 ## References
 
