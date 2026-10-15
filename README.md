@@ -13,7 +13,7 @@ npx -y skills add hexsis-llc/skills
 ## Included Skills
 
 - `claude-pr-review`: Sets up review-only Claude pull-request review in GitHub Actions, with read-only sub-agents, tracking comments, `@claude` mentions on public and private repositories, and an informational job summary.
-- `docs-governance`: Routes, authority checks, and change control for documentation-governed repositories, layered on Matt Pocock's skills.
+- `docs-governance`: Keeps docs the product authority: one dated owner-decision register, lasting docs in `docs/` grouped by kind, scratch in an ignored `.scratch/`, and docs kept in agreement with decisions. Layered on Matt Pocock's skills.
 - `git-committer`: Generates concise conventional one-line commit messages from a git diff.
 - `gwt-tester`: Helps write or refactor tests into clear Given/When/Then structure.
 - `pub-package-explorer`: Finds and reads Dart/Flutter package source from local deps or pub.dev.
