@@ -47,24 +47,28 @@ Where Git checks symlinks out as plain files (`core.symlinks=false`), use a `CLA
 ## 4. Create the Homes
 
 1. Add `.scratch/` to `.gitignore`.
-2. Create `docs/README.md`: start-here reading order, then one section per folder listing each doc and when to read it.
+2. Create `docs/README.md`: start-here reading order, then one section per folder listing each current doc and when to read it. List record folders (`qualification/`, `research/`, `adr/`) as folders.
 3. Create `docs/CONTEXT.md` (the glossary) and `docs/product-decisions.md` (the register, SKILL.md section 3). Move existing decisions into register entries, each dated when the owner decided it if known, otherwise noted as "Recorded on YYYY-MM-DD from <source>".
 4. Move each lasting doc into its folder, following SKILL.md section 4 for every reference. Remove scratch and stale docs the owner agreed to remove, repointing their links at Git history.
 
-## 5. Route Agents
+## 5. Install the Skill and Route Agents
 
-Add these sections to `AGENTS.md`, adapted to the repository. Write them with `writing-for-agents`.
+1. Install `docs-governance` into the repository's skills directory and lock file, so every agent and automated reviewer has it: `npx -y skills add hexsis-llc/skills --skill docs-governance -y`.
+2. Add these lines to `AGENTS.md`, adapted to the repository:
 
 ```markdown
 Read these before changing anything:
 
 - docs/README.md: the docs index
 - docs/product-decisions.md: owner decisions; don't reverse one without asking
-- docs/CONTEXT.md: the domain language
-- <docs/agents/...>: <release process, review rules, issue tracker>
+- docs/CONTEXT.md: the glossary
+- <docs/agents/...>: <release process, review rules, issue tracker, domain conventions>
 
-Follow the docs-governance skill for where docs go, recording decisions, and keeping docs in agreement with them.
+Load the docs-governance skill before you add, move, or remove a doc, write a note,
+plan, or spec, or record or rely on an owner decision.
 ```
+
+The step is done when a fresh agent asked to write a plan puts it in `.scratch/`.
 
 ## 6. From the Record-Based Model
 
