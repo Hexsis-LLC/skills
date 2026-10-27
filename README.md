@@ -16,6 +16,7 @@ npx -y skills add hexsis-llc/skills
 - `docs-governance`: Keeps docs the product authority: one dated owner-decision register, lasting docs in `docs/` grouped by kind, scratch in an ignored `.scratch/`, and docs kept in agreement with decisions. Layered on Matt Pocock's skills.
 - `git-committer`: Generates concise conventional one-line commit messages from a git diff.
 - `gwt-tester`: Helps write or refactor tests into clear Given/When/Then structure.
+- `pair-review`: Reviews a GitHub pull request together with the user: shared findings in scratch, one review posted as the user with suggestion blocks for known fixes, then replies verified and fixed threads resolved.
 - `pub-package-explorer`: Finds and reads Dart/Flutter package source from local deps or pub.dev.
 
 ## Repository Layout
