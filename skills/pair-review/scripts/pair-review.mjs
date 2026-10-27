@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -367,7 +367,9 @@ const usage = `Usage: pair-review.mjs <command>
   resolve DIR ID... [--yes]   resolve the threads of these findings
   reply DIR FILE [--yes]      post [{id, body}] replies on their threads`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Skills are usually installed through a symlink (~/.claude/skills -> ~/.agents/skills), and
+// import.meta.url is the resolved path, so compare against argv[1]'s real path.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const argv = process.argv.slice(2);
   const flag = (name) => {
     const i = argv.indexOf(name);

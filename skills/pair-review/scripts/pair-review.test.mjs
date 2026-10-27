@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   applySuggestion,
@@ -166,6 +171,22 @@ test('drafts with the same body are told apart by path and line', () => {
   const ids = matchThreads([thread('T1', 'lib/b.dart', 9, 'Same as above.'), thread('T2', 'lib/a.dart', 5, 'Same as above.')], drafts);
   // Then each thread gets its own draft.
   assert.deepEqual(ids, { T1: 'P2', T2: 'P1' });
+});
+
+test('the CLI runs when the skill is reached through a symlink', () => {
+  // Given the skill folder linked from elsewhere, as ~/.claude/skills links to ~/.agents/skills.
+  const dir = mkdtempSync(join(tmpdir(), 'pair-review-'));
+  const linked = join(dir, 'pair-review');
+  symlinkSync(dirname(dirname(fileURLToPath(import.meta.url))), linked);
+  try {
+    // When the script is run with no command through the link.
+    const result = spawnSync(process.execPath, [join(linked, 'scripts', 'pair-review.mjs')], { encoding: 'utf8' });
+    // Then it runs and fails with its usage, instead of exiting 0 silently.
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^Usage: pair-review\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the rendered drafts show id, kind, fix, and range', () => {
