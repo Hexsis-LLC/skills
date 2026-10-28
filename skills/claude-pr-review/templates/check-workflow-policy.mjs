@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Enforces the secret and permission boundary of the Claude review workflow. Only job `review` may
 // hold the write scopes below, only its SHA-pinned Claude action step may read the review secret,
-// as its token input, and no other workflow may read that secret at all.
+// as its token input, and no other workflow may read that secret at all. No checkout in any
+// workflow may keep the job token.
 
 // PARAMETERS: keep these in step with the review workflow.
 const reviewWorkflow = '.github/workflows/claude-review.yml';
@@ -48,10 +49,10 @@ const isSequenceItem = (text) => /^-(\s|$)/.test(text);
 const isMapping = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 // Parses the block-style YAML subset these workflows use: plain-key mappings, sequences,
-// plain or single-line quoted scalars, single-line flow lists of scalars, and `|` literal and
-// `>` folded block scalars. Everything else (flow mappings, quoted keys, anchors, aliases, tags, multi-line
-// plain or quoted scalars, duplicate keys) throws, so the policy fails closed instead of
-// misreading structure that line patterns cannot see.
+// plain or single-line quoted scalars, single-line flow lists of scalars, the empty mapping `{}`,
+// and `|` literal and `>` folded block scalars. Everything else (other flow mappings, quoted keys,
+// anchors, aliases, tags, multi-line plain or quoted scalars, duplicate keys) throws, so the policy
+// fails closed instead of misreading structure that line patterns cannot see.
 export function parseWorkflowYaml(text) {
   const lines = text.split('\n');
   let pos = 0;
@@ -95,6 +96,8 @@ export function parseWorkflowYaml(text) {
   }
 
   function scalar(value, index) {
+    // `{}`, as in `permissions: {}`, is the one flow mapping allowed.
+    if (value === '{}') return Object.create(null);
     if (/^[{&*!%@`|>]/.test(value) || value.startsWith('? ')) {
       fail('flow mappings, anchors, aliases, tags, and directives are not supported', index);
     }
@@ -432,12 +435,19 @@ function checkReviewWorkflow(file, text, errors) {
 }
 
 // Every other workflow keeps its own rules, but may not read the review secret, directly, through
-// `toJSON(secrets)`, or by passing every secret to a reusable workflow.
+// `toJSON(secrets)`, or by passing every secret to a reusable workflow, and its checkouts persist
+// no git credential either: later steps, third-party actions included, would find the job's token
+// in .git/config.
 function checkOtherWorkflow(file, text, errors) {
   const name = new RegExp(`\\b${reviewSecret}\\b`, 'i');
   if (secretExpressions(text).some((expression) => name.test(expression) || /toJSON\s*\(\s*secrets\s*\)/i.test(expression)) ||
     /^\s*secrets:\s*inherit\b/m.test(text)) {
     errors.push(`${file}: only ${reviewWorkflow} may read ${reviewSecret}`);
+  }
+  const workflow = parse(file, text, errors);
+  if (!isMapping(workflow?.jobs)) return;
+  for (const job of Object.values(workflow.jobs)) {
+    if (isMapping(job)) checkCheckouts(file, job.steps, errors);
   }
 }
 

@@ -10,7 +10,7 @@ The threat: the pull request is **untrusted input** that steers an agent holding
   - Job `review` gets `id-token: write` for the OIDC token exchange, `issues: write`, and `pull-requests: read` for the context and summary steps. Claude posts reviews and comments with its app token. This job's `GITHUB_TOKEN` submits and dismisses no review, so the policy check rejects `pull-requests: write` here. No `actions: read`, so tag mode cannot install the CI-log tools.
   - The tracking-comment jobs `track` and `report` get exactly `pull-requests: write` and nothing else; see [Tracking comments](#tracking-comments).
 - **App token downgraded.** The Claude GitHub App token defaults to `contents: write`. `additional_permissions: contents: read` caps it, so a prompt-injected run cannot push or merge even if a tool limit fails. GitHub enforces this, not the model.
-- **`persist-credentials: false`** on checkout keeps the job token out of `.git/config`.
+- **`persist-credentials: false`** on every checkout, in every workflow, keeps the job token out of `.git/config`. In the review job, Claude's file tools can reach the checkout. In any other workflow, a later step, a third-party action included, could read the token there. The policy check parses every workflow and rejects a checkout without the flag.
 - **Pin every action by commit SHA.** A tag can move; a SHA cannot. An action update is a reviewed change to the pin.
 
 ## Untrusted pull-request content
@@ -53,6 +53,7 @@ Why they are shaped this way:
 - **A separate job holds `pull-requests: write`.** Commenting on a pull request with the job token needs it; `issues: write` gets `Resource not accessible by integration`. Job `review` must not hold it, because that token could submit or dismiss reviews. So `track` and `report` hold exactly that scope and run only bash steps: no actions, checkout, container, services, or secrets. They make only `gh api` calls with fixed text and `env` values. The policy check enforces all of this, and bash's `-eo pipefail` makes a failed call fail its step.
 - **No edit of `claude[bot]`'s comment.** Only a comment's author can edit it, the action revokes its app token in its last step, and repeating its OIDC exchange would copy an undocumented API. So a stuck mention gets a new note instead.
 - **No `track_progress`.** It forces tag mode for `pull_request`, whose prompt has Claude post its review into the tracking comment, breaking the one-formal-review contract.
+- **GitHub-hosted, whatever runs job `review`.** The runner label applies to job `review` only. `track` and `report` stay on `ubuntu-latest`: they run only bash steps and need no self-hosted tooling, they should not take self-hosted slots, and `report` must still run when the runner that ran `review` failed.
 - **No `actions: read`.** Job `review` outputs `job.check_run_id`, which is its job ID, so the link needs no job listing. When the ID is empty, the link falls back to the run.
 
 ## Expressions stay out of run scripts

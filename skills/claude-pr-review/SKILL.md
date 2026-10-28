@@ -20,7 +20,7 @@ What the setup does:
 | --- | --- | --- |
 | [`templates/claude-review.yml`](templates/claude-review.yml) | `.github/workflows/claude-review.yml` | The review workflow |
 | [`templates/claude-review-gate.mjs`](templates/claude-review-gate.mjs) | `scripts/claude-review-gate.mjs` | Builds the diff manifest and the job summary |
-| [`templates/check-workflow-policy.mjs`](templates/check-workflow-policy.mjs) | `scripts/check-workflow-policy.mjs` | Enforces the secret and permission boundary in CI |
+| [`templates/check-workflow-policy.mjs`](templates/check-workflow-policy.mjs) | `scripts/check-workflow-policy.mjs` | Enforces the secret and permission boundary in CI, and keeps the job token out of every workflow's checkouts |
 | `templates/*.test.mjs` | `scripts/*.test.mjs` | `node:test` suites for both scripts |
 
 The scripts need Node.js 22 or later and no dependencies. They go in `scripts/` unless that directory feeds a build; see [Choose the script directory](#choose-the-script-directory). Search the templates for `PARAMETER` to find each repo-specific choice.
@@ -29,7 +29,7 @@ The scripts need Node.js 22 or later and no dependencies. They go in `scripts/` 
 
 | Parameter | Default | Where it lives |
 | --- | --- | --- |
-| Runner label | `ubuntu-latest` | `runs-on` in jobs `review`, `track`, and `report`. A self-hosted label also goes in `.github/actionlint.yaml` under `self-hosted-runner.labels`. The runner needs `sudo` apt access and Docker, or bubblewrap and the MCP image baked in. |
+| Runner label | `ubuntu-latest` | `runs-on` in job `review` only. A self-hosted label also goes in `.github/actionlint.yaml` under `self-hosted-runner.labels`. The runner needs `sudo` apt access and Docker, or bubblewrap and the MCP image baked in. Jobs `track` and `report` stay on `ubuntu-latest`: they run only bash steps, should not take self-hosted slots, and `report` must not depend on a runner that may have failed. |
 | Model | `claude-sonnet-5-5` | `--model` in `claude_args` |
 | Review rules location | `AGENTS.md, CLAUDE.md` | `REVIEW_RULES` in the job env. Read from the default branch's copy, plus the nearest same-named file above each changed path. |
 | Trigger set | automatic review and `@claude` mentions | `on:`, the job `if:`, and `trigger_phrase` |
@@ -49,9 +49,11 @@ Read, don't assume:
 
 - the default branch, the existing workflows, and the CI job where Node checks run;
 - the rules files (`AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, or nested ones);
-- the runner the repository already uses;
+- the runner the repository already uses, for job `review`;
 - branch protection and rulesets on the default branch, especially required-review rules;
 - whether any workflow uses `secrets: inherit` or `toJSON(secrets)`. The policy check blocks both, because they would hand the review secret to another workflow;
+- every `actions/checkout` in every workflow, and whether it sets `persist-credentials: false`. The policy check requires that flag on each one, because later steps, third-party actions included, would otherwise find the job token in `.git/config`. Tell the user which existing checkouts need the flag added, and whether any of them pushes with that token and needs another credential instead;
+- whether every workflow fits the policy check's YAML subset: block-style mappings and sequences, single-line scalars and flow lists, and `|` or `>` block scalars, with `{}` the only flow mapping. The check parses every workflow and fails closed on one it cannot read;
 - the docs-governance markers: an `AGENTS.md` that routes to the `docs-governance` skill or a decision register (see [Docs-governance mode](#docs-governance-mode)).
 - whether anything builds from `scripts/`: a Dockerfile `COPY`, an image recipe, a packaging list, or a hash or digest computed over the directory. If so, the review scripts go in `.github/scripts/` (see [Choose the script directory](#choose-the-script-directory)).
 
@@ -80,7 +82,7 @@ The template pins every action by commit SHA. Re-resolve each pin rather than tr
 
 ### 3. Install the templates
 
-Copy the files into place and set every parameter. Keep each security control intact. Before you change one, read [references/security-model.md](references/security-model.md); it explains what each control closes. Keep the review prompt's output contract intact; the job summary quotes the review it finds but checks nothing in it.
+Copy the files into place and set every parameter. Add `persist-credentials: false` to each existing checkout the survey found without it. Keep each security control intact. Before you change one, read [references/security-model.md](references/security-model.md); it explains what each control closes. Keep the review prompt's output contract intact; the job summary quotes the review it finds but checks nothing in it.
 
 Add `node --test scripts/claude-review-gate.test.mjs scripts/check-workflow-policy.test.mjs` and `node scripts/check-workflow-policy.mjs` to the repository's existing CI. Use the script directory you chose in step 1. Adapt the test fixtures to the repository's own paths when you change the classes.
 
