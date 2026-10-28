@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 // alwaysSource, and any file of unknown kind, is source, so it gets a reader too. Widen skim only
 // for files whose defects a reviewer could not find by reading the diff.
 const alwaysSource = /^\.github\//;
-const lockFiles = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|[^/]+\.lock)$/;
+const lockFiles = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|[^/]+\.lock|[^/]+-lock\.json|go\.sum)$/;
 const fixtures = /(^|\/)(fixtures?|golden|snapshots|__snapshots__|testdata)\/|\.snap$/;
 const docs = /^docs\/|\.(md|mdx|rst|txt)$/;
 // PARAMETER: diff lines per source chunk; the reviewer starts one diff-reviewer per chunk.

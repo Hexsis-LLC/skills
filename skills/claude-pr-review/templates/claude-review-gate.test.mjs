@@ -39,9 +39,11 @@ const files = [
 test('changed files are classed as source or skim', () => {
   // Given paths from each class.
   const source = ['src/a.ts', 'apps/web/main.py', 'scripts/x.mjs', '.github/workflows/ci.yml',
-    '.github/CODEOWNERS', 'package.json', 'Cargo.toml', 'Makefile', '.tool-versions', 'Dockerfile'];
+    '.github/CODEOWNERS', 'package.json', 'Cargo.toml', 'Makefile', '.tool-versions', 'Dockerfile',
+    'go.mod', 'services/api/go.mod', 'src/lock.json', 'src/block-lock.ts'];
   const skim = ['package-lock.json', 'yarn.lock', 'Cargo.lock', 'src/a/tests/fixtures/run.json',
-    'src/a/tests/golden/plan.txt', 'src/__snapshots__/a.snap', 'docs/guides/setup.md', 'README.md', 'AGENTS.md'];
+    'src/a/tests/golden/plan.txt', 'src/__snapshots__/a.snap', 'docs/guides/setup.md', 'README.md', 'AGENTS.md',
+    'go.sum', 'services/api/go.sum', 'skills-lock.json', 'apps/web/package-lock.json', 'deno-lock.json'];
   // When each path is classified.
   // Then source paths are chunked for a full read and the rest may be skimmed.
   for (const path of source) assert.equal(classifyPath(path), 'source', path);

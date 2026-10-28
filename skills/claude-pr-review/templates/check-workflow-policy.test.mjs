@@ -217,6 +217,54 @@ test('git credentials stay out of the checkout', (t) => {
   }
 });
 
+test('every workflow checks out without persisting the job token', (t) => {
+  // Given another workflow, with no permissions at all, that checks out the repository.
+  const checkout = deploy.replace('permissions:\n  contents: write\n', 'permissions: {}\n')
+    .replace('    steps:\n', '    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n' +
+      '        with:\n          persist-credentials: false\n');
+  // When the policy check reads it.
+  const passing = run(t, { '.github/workflows/deploy.yml': checkout });
+  // Then it passes.
+  assert.equal(passing.status, 0, passing.stderr);
+
+  // Given the same checkout without persist-credentials: false, or with it set to true.
+  for (const text of [checkout.replace('        with:\n          persist-credentials: false\n', ''),
+    checkout.replace('persist-credentials: false', 'persist-credentials: true')]) {
+    // When the policy check reads it.
+    const result = run(t, { '.github/workflows/deploy.yml': text });
+    // Then it rejects the checkout.
+    assert.equal(result.status, 1, text);
+    assert.match(result.stderr, /deploy\.yml:\d+: checkout must set persist-credentials: false/);
+  }
+});
+
+test('the empty mapping is the only flow mapping the parser accepts', (t) => {
+  // Given a job in the review workflow and another workflow that grant no permissions with `{}`.
+  const emptyJob = otherJob.replace('    permissions:\n      pull-requests: write\n', '    permissions: {}\n');
+  const passing = run(t, {
+    '.github/workflows/claude-review.yml': `${review}${emptyJob}`,
+    '.github/workflows/deploy.yml': deploy.replace('permissions:\n  contents: write\n', 'permissions: {}\n'),
+  });
+  // When the policy check reads them.
+  // Then it passes.
+  assert.equal(passing.status, 0, passing.stderr);
+
+  // Given workflows with any other flow mapping.
+  const cases = [
+    ['claude-review.yml', review.replace('permissions:\n  contents: read\n', 'permissions: { contents: read }\n'),
+      /claude-review\.yml: unsupported YAML at line 4: flow mappings/],
+    ['deploy.yml', deploy.replace('permissions:\n  contents: write\n', 'permissions: {contents: write}\n'),
+      /deploy\.yml: unsupported YAML at line 4: flow mappings/],
+  ];
+  for (const [name, text, message] of cases) {
+    // When the policy check reads each one.
+    const result = run(t, { [`.github/workflows/${name}`]: text });
+    // Then it fails closed.
+    assert.equal(result.status, 1, text);
+    assert.match(result.stderr, message);
+  }
+});
+
 test('run steps take values through env, not expressions', (t) => {
   // Given a review workflow whose run script pastes an expression into the shell.
   const text = review.replace('    steps:\n',

@@ -39,8 +39,8 @@ jobs:
         contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' &&
         contains(github.event.comment.body, '@claude'))
-    # PARAMETER: runner label, here and in jobs track and report. A self-hosted label also goes in
-    # .github/actionlint.yaml.
+    # PARAMETER: runner label, for this job only. A self-hosted label also goes in
+    # .github/actionlint.yaml. Jobs track and report stay on ubuntu-latest.
     runs-on: ubuntu-latest
     # PARAMETER: timeout.
     timeout-minutes: 30
@@ -389,7 +389,8 @@ jobs:
   # pull-requests: write, which job review must not hold: its token could then submit or dismiss
   # reviews. So two small jobs hold that one scope and run only bash steps: no actions, checkout,
   # container, services, or secrets, and every value comes through env. The policy check enforces
-  # that shape.
+  # that shape. Both stay GitHub-hosted whatever runs job review: they need no self-hosted tooling,
+  # should not take self-hosted slots, and report must not depend on a runner that may have failed.
   # The action's track_progress input is not used: it forces tag mode, whose prompt has Claude post
   # its review into a claude[bot] comment instead of one formal review.
   track:

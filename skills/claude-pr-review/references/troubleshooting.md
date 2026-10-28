@@ -86,3 +86,8 @@ Failure modes this setup has hit, by symptom. Most of them end **green with noth
 
 **Cause:** the check scans every `${{ … }}` expression in the review workflow text, comments included, so a commented-out `${{ secrets.X }}` counts as a second secret access.
 **Fix:** write secret names in comments without the expression syntax.
+
+## The policy check blocks another workflow
+
+**Cause:** the check parses every workflow, not only the review workflow. It rejects any `actions/checkout` without `persist-credentials: false`, because a later step, a third-party action included, could read the job token in `.git/config`. It also fails closed with `unsupported YAML` on syntax outside its subset, such as a flow mapping other than `{}`, an anchor, or a multi-line quoted scalar.
+**Fix:** add `persist-credentials: false` to the checkout. A step that pushes with the job token then needs its credential passed explicitly, for that step only. Rewrite unsupported YAML in block style; `permissions: {}` is accepted.
