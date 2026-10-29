@@ -9,7 +9,7 @@ Docs hold the current truth and the dated records behind it. Git keeps every dif
 
 ## Detect the Setup
 
-The markers are an `AGENTS.md` that routes to `docs/`, a decision register (by default `docs/product-decisions.md`), a glossary (`docs/CONTEXT.md`), and an index (`docs/README.md`).
+The markers are an `AGENTS.md` that routes to `docs/`, a decision register (by default `docs/product-decisions.md`), a glossary (root `GLOSSARY.md`, or root `GLOSSARY-MAP.md` in a multi-context repository), and an index (`docs/README.md`).
 
 - **Setup present:** follow this skill. Where the repository's docs name other paths, use theirs.
 - **Record-based setup** (`CHG-*` and `DEC-*` record files, a document registry, front-matter histories): follow that repository's own governance docs, and offer the move in [BOOTSTRAP.md](BOOTSTRAP.md#6-from-the-record-based-model) when the owner asks.
@@ -44,7 +44,7 @@ Default homes (a repository may rename them; its `docs/README.md` lists the real
 | --- | --- |
 | `AGENTS.md` (`CLAUDE.md` a symlink to it) | Routes and guardrails that point at docs. |
 | `docs/README.md` | The index: every current doc, with when to read it, grouped by folder. Record folders are listed as folders. |
-| `docs/CONTEXT.md` | The glossary: terms only. |
+| `GLOSSARY.md` (repository root) | The glossary: terms only. A repository with several contexts has a root `GLOSSARY-MAP.md` instead, pointing at each context's `GLOSSARY.md`. These are the paths Matt Pocock's skills use. |
 | `docs/product-decisions.md` | The owner decision register (section 3). |
 | `docs/product/` | What the product is: overview and requirements, specification, go-to-market. |
 | `docs/operations/` | Running the product: install, deploy, and operator guides. |
@@ -113,7 +113,7 @@ Before you commit a docs change:
 
 | Skill | What this method adds |
 | --- | --- |
-| `grill-with-docs`, `domain-modeling` | Resolved terms go in `docs/CONTEXT.md`. An accepted direction goes in the register; an architecture decision also gets an ADR. |
+| `grill-with-docs`, `domain-modeling` | Resolved terms go in `GLOSSARY.md` (or the context's `GLOSSARY.md` that `GLOSSARY-MAP.md` names). An accepted direction goes in the register; an architecture decision also gets an ADR. |
 | `to-spec`, `to-tickets` | A spec that only drives the work goes in `.scratch/`; lasting requirements go in `docs/product/`; tickets go in the issue tracker. |
 | `wayfinder` | The map is scratch while it is in use. A completed map the owner keeps becomes a lasting record in its own folder. |
 | `research`, `prototype` | Lasting findings go in `docs/research/` or `docs/qualification/` as a dated record. Throwaway work stays in `.scratch/`. |

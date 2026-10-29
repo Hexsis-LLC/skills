@@ -7,7 +7,8 @@ Use this file to adopt the method in a repository that does not have it yet. Exp
 Read what exists, and assume nothing:
 
 - `AGENTS.md`, `CLAUDE.md`, and any nested ones. For each `CLAUDE.md`, note whether it is a symlink, a file with content, or a file that only imports another file (such as `@AGENTS.md`).
-- `README.md`, everything under `docs/`, `CONTEXT.md`, and any ADR folder.
+- `README.md`, everything under `docs/`, `GLOSSARY.md` or `GLOSSARY-MAP.md`, and any ADR folder.
+- A legacy glossary: `CONTEXT.md`, `CONTEXT-MAP.md`, or `docs/CONTEXT.md`. With the owner's agreement, `git mv` each `CONTEXT.md` to `GLOSSARY.md` and `CONTEXT-MAP.md` to `GLOSSARY-MAP.md`, with `docs/CONTEXT.md` going to the root, following SKILL.md section 4 for every reference.
 - The issue tracker (`git remote -v`) and where unfinished work is tracked today.
 - `.gitignore`, and the skills directory (for example `.agents/skills/`).
 
@@ -48,7 +49,7 @@ Where Git checks symlinks out as plain files (`core.symlinks=false`), use a `CLA
 
 1. Add `.scratch/` to `.gitignore`.
 2. Create `docs/README.md`: start-here reading order, then one section per folder listing each current doc and when to read it. List record folders (`qualification/`, `research/`, `adr/`) as folders.
-3. Create `docs/CONTEXT.md` (the glossary) and `docs/product-decisions.md` (the register, SKILL.md section 3). Move existing decisions into register entries, each dated when the owner decided it if known, otherwise noted as "Recorded on YYYY-MM-DD from <source>".
+3. Create root `GLOSSARY.md` (the glossary; `GLOSSARY-MAP.md` for several contexts) and `docs/product-decisions.md` (the register, SKILL.md section 3). Move existing decisions into register entries, each dated when the owner decided it if known, otherwise noted as "Recorded on YYYY-MM-DD from <source>".
 4. Move each lasting doc into its folder, following SKILL.md section 4 for every reference. Remove scratch and stale docs the owner agreed to remove, repointing their links at Git history.
 
 ## 5. Install the Skill and Route Agents
@@ -61,7 +62,7 @@ Read these before changing anything:
 
 - docs/README.md: the docs index
 - docs/product-decisions.md: owner decisions; don't reverse one without asking
-- docs/CONTEXT.md: the glossary
+- GLOSSARY.md: the glossary
 - <docs/agents/...>: <release process, review rules, issue tracker, domain conventions>
 
 Load the docs-governance skill before you add, move, or remove a doc, write a note,
