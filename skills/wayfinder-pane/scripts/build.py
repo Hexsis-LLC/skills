@@ -237,7 +237,7 @@ class Site:
             return f'<a class="ref s-{t["s"]}" href="{prefix}{n}.html" title="{html.escape(self.short(n))}">#{n}</a>'
 
         # Link #NN only outside the anchors made above, so a URL or link label keeps its #NN as text.
-        parts = re.split(r"(<a [^>]*>.*?</a>)", text)
+        parts = re.split(r"(<a [^>]*>.*?</a>)", text, flags=re.S)
         return "".join(p if i % 2 else re.sub(r"(?<![\w&])#(\d+)(?!\d)", ref, p) for i, p in enumerate(parts))
 
     def page(self, title, body, depth_prefix):
@@ -406,12 +406,12 @@ def safe_to_replace(out):
     """Only ever delete an empty folder or a previous build of this script."""
     if not out.exists():
         return True
-    if not out.is_dir():
-        return False
     entries = {p.name for p in out.iterdir()}
     if not entries:
         return True
     if "index.html" not in entries or not entries <= {"index.html", "t", "assets"}:
+        return False
+    if any((out / d).exists() and not (out / d).is_dir() for d in ("t", "assets")):
         return False
     assets = {p.name for p in (out / "assets").iterdir()} if (out / "assets").is_dir() else set()
     pages = list((out / "t").iterdir()) if (out / "t").is_dir() else []
