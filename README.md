@@ -18,6 +18,7 @@ npx -y skills add hexsis-llc/skills
 - `gwt-tester`: Helps write or refactor tests into clear Given/When/Then structure.
 - `pair-review`: Reviews a GitHub pull request together with the user: shared findings in scratch, one review posted as the user with suggestion blocks for known fixes, then replies verified and fixed threads resolved.
 - `pub-package-explorer`: Finds and reads Dart/Flutter package source from local deps or pub.dev.
+- `wayfinder-pane`: Builds a static Glass Page site that shows tickets as cards on a dependency map, with hover chain highlighting and a page per ticket. Pairs with `/wayfinder`, but maps any set of items with "comes before" links. Covers the publish, update and feedback loop.
 
 ## Repository Layout
 
