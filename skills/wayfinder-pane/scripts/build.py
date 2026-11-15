@@ -80,6 +80,8 @@ def load_content(project):
     spec = importlib.util.spec_from_file_location("pane_content", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    for name in ("INDEX", "LANES", "T"):
+        check(hasattr(module, name), f"pane_content.py needs {name}")
     return module
 
 
@@ -90,7 +92,8 @@ def parse_ticket(path):
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     check(lines and lines[0].startswith("# "), f"{path.name}: the first line must be '# <title>'")
-    fields = dict(re.findall(r"^(Type|Status|Owner|Inputs from|Blocked by|Labels): *(.*?) *$", text, re.M))
+    header = re.split(r"^## ", text, maxsplit=1, flags=re.M)[0]  # body lines such as "Status:" under ## Answer never count
+    fields = dict(re.findall(r"^(Type|Status|Owner|Inputs from|Blocked by|Labels): *(.*?) *$", header, re.M))
     kind = fields.get("Type", "")
     if not kind:
         label = re.search(r"wayfinder:(\w+)", fields.get("Labels", ""))
@@ -167,8 +170,8 @@ class Site:
         self.T = C.T
         states = dict(DEFAULT_STATES)
         states.update(getattr(C, "STATES", {}))
-        self.state_label = {s: states[s][0] for s in STATE_ORDER}
-        self.short_label = {s: states[s][1] for s in STATE_ORDER}
+        self.state_label = {s: html.escape(states[s][0]) for s in STATE_ORDER}
+        self.short_label = {s: html.escape(states[s][1]) for s in STATE_ORDER}
         self.kinds = dict(DEFAULT_KINDS)
         self.kinds.update(getattr(C, "KINDS", {}))
         self.index = dict(DEFAULT_INDEX)
@@ -176,6 +179,8 @@ class Site:
         check(self.index["title"], "INDEX['title'] is required")
         self.sections = list(getattr(C, "SECTIONS", DEFAULT_SECTIONS))
         self.lanes = list(C.LANES)
+        keys = [key for key, _, _ in self.lanes]
+        check(len(set(keys)) == len(keys), f"two lanes share a key: {sorted({k for k in keys if keys.count(k) > 1})}")
         for key, label, ns in self.lanes:
             check(re.fullmatch(r"[a-z0-9-]+", key), f"lane key {key!r}: use lower-case letters, digits and hyphens")
             for n in ns:
@@ -195,13 +200,17 @@ class Site:
         extra = sorted(set(self.T) - set(self.tickets))
         check(not extra, f"T has content for tickets that are not on the map: {extra}")
         known = TICKET_KEYS | {key for key, _, _ in self.sections}
+        lists = {key for key, _, kind in self.sections if kind in ("list", "steps")} | {"related"}
         for n, c in self.T.items():
             for key in ("short", "one"):
                 check(c.get(key), f"T[{n!r}] needs {key!r}")
             unknown = sorted(set(c) - known)
             check(not unknown, f"T[{n!r}] has unknown keys {unknown}; add them to SECTIONS or fix the name")
+            for key in lists & set(c):
+                check(isinstance(c[key], list), f"T[{n!r}][{key!r}] must be a list")
             for item in c.get("related", []):
                 check(isinstance(item, dict) and item.get("label") and item.get("href"), f"T[{n!r}]['related'] items need label and href")
+                check(item.get("state", "others") in STATE_ORDER, f"T[{n!r}]['related'] state must be one of {STATE_ORDER}")
 
     def kind(self, t):
         return self.kinds.get(t["type"], t["type"].capitalize())
@@ -227,7 +236,9 @@ class Site:
             t = self.tickets[n]
             return f'<a class="ref s-{t["s"]}" href="{prefix}{n}.html" title="{html.escape(self.short(n))}">#{n}</a>'
 
-        return re.sub(r"(?<![\w&])#(\d+)(?!\d)", ref, text)
+        # Link #NN only outside the anchors made above, so a URL or link label keeps its #NN as text.
+        parts = re.split(r"(<a [^>]*>.*?</a>)", text)
+        return "".join(p if i % 2 else re.sub(r"(?<![\w&])#(\d+)(?!\d)", ref, p) for i, p in enumerate(parts))
 
     def page(self, title, body, depth_prefix):
         return f"""<!doctype html>
@@ -395,8 +406,16 @@ def safe_to_replace(out):
     """Only ever delete an empty folder or a previous build of this script."""
     if not out.exists():
         return True
+    if not out.is_dir():
+        return False
     entries = {p.name for p in out.iterdir()}
-    return not entries or ("index.html" in entries and entries <= {"index.html", "t", "assets"})
+    if not entries:
+        return True
+    if "index.html" not in entries or not entries <= {"index.html", "t", "assets"}:
+        return False
+    assets = {p.name for p in (out / "assets").iterdir()} if (out / "assets").is_dir() else set()
+    pages = list((out / "t").iterdir()) if (out / "t").is_dir() else []
+    return assets <= {"site.css", "map.js"} and all(p.is_file() and p.suffix == ".html" for p in pages)
 
 
 def main(argv=None):
@@ -411,6 +430,7 @@ def main(argv=None):
         tickets = load_tickets(project, C)
         site = Site(C, tickets)
         check(out != project and out not in project.parents, f"refusing to replace {out}, which holds the project")
+        check(not out.exists() or out.is_dir(), f"{out} is a file; --out takes a folder")
         check(safe_to_replace(out), f"{out} holds files this script did not write; pick an empty or new --out folder")
         index = site.index_html()
         pages = {n: site.ticket_html(t) for n, t in tickets.items()}

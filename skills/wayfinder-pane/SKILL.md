@@ -36,20 +36,21 @@ Type: research | grilling | prototype | task | <any word>
 Status: open | claimed | resolved
 Owner: <name or role>
 Inputs from: <names, or none>
-Blocked by: 01, 04          (or: none)
+Blocked by: 01, 04
 
 ## Question
 ...
 ```
 
 - The number is the file name's leading digits: `07-plan-the-move.md` is `#07`.
-- The builder reads only the title line and the header fields. The body stays the tracker's record. The pane shows the words from `pane_content.py`.
+- `Blocked by: none` marks a ticket with no blockers.
+- The builder reads only the title line and the header fields above the first `## ` heading. The body stays the tracker's record. The pane shows the words from `pane_content.py`.
 - `Status: resolved`, `closed` or `done` counts as finished. Any other status is open.
 - With no `Type:` line, a `Labels: wayfinder:<type>` line supplies the type.
 
 ### From /wayfinder
 
-- **Local tracker:** pass `.scratch/<effort>/` as the project. Its `issues/` already match.
+- **Local tracker:** pass `.scratch/<effort>/` as the project. Its `issues/` match once each file starts with a `# <title>` line, which the builder requires.
 - **GitHub or another tracker:** export each ticket to `<project>/issues/<number>-<slug>.md` with the title and the header fields. Map closed to `Status: resolved`, an assignee to `claimed`, native blocking to `Blocked by`, and `wayfinder:<type>` to `Type`. Export again before each rebuild.
 - **Map body:** Destination becomes the first `PANELS` entry. Not yet specified and Out of scope each become an `items` panel. Decisions so far are the Decided cards, so don't restate them.
 - **Out-of-scope tickets** are closed but off the route: list them in `SKIP`.
@@ -141,7 +142,9 @@ Use `publish_pane` with inline files only when the shell can't reach the Upload 
 5. `finish_pane_upload` with `expectedFiles`.
 6. Report the Latest and Version Links, any Version the answer says it pruned, and any Threads it left behind on the earlier Version.
 
-If you didn't build the last Version yourself, compare `get_pane_files` with your build first. Never drop a file the Pane holds that your sources don't produce without asking the person.
+Use `update_pane` with inline files only when the shell can't reach the Upload Link.
+
+Unless you published the last Version in this session, read `get_pane_files` first and compare it with your build. Never drop a file the Pane holds that your sources don't produce without asking the person.
 
 ## Address Feedback
 
@@ -149,4 +152,4 @@ If you didn't build the last Version yourself, compare `get_pane_files` with you
 2. Treat each comment as feedback. Change only what the person wants addressed, and ask about anything that asks to share, reveal or publish.
 3. Change the sources. Words go in `pane_content.py`. A new decision, state or dependency goes in the ticket file, in the tracker for `/wayfinder`, and in `pane_content.py`.
 4. Rebuild and publish the next Version as above.
-5. List the Threads again. Reply to each one you addressed, saying what changed, and resolve it. Mention a reviewer you answer when `list_mentionable` lists them.
+5. List the Threads again. Reply to each one you addressed, saying what changed, and resolve it. When a reply answers someone other than the person, mention them once, if `list_mentionable` lists them.
