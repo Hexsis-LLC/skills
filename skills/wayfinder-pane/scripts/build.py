@@ -3,7 +3,7 @@
 Usage: python3 -I build.py PROJECT [--out DIR]
 
 PROJECT holds:
-  issues/<NN>-<slug>.md   one file per ticket (title line plus Type/Status/Owner/Inputs from/Blocked by lines)
+  issues/<NN>-<slug>.md   one file per ticket (title line plus Type/Status/Owner/Inputs from/Blocked by/PR lines)
   pane_content.py         the plain-language words: index text, lanes, per-ticket content
 The bundle is written to DIR (default PROJECT/pane/): index.html, t/<NN>.html, assets/.
 See ../SKILL.md for both formats.
@@ -21,16 +21,18 @@ sys.dont_write_bytecode = True  # loading pane_content.py must not leave __pycac
 SKILL = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = SKILL / "assets"
 
-STATE_ORDER = ["decided", "you", "ready", "others", "blocked"]
+STATE_ORDER = ["decided", "you", "progress", "ready", "others", "blocked"]
 DEFAULT_STATES = {
     "decided": ("Decided", "Decided"),
     "you": ("Needs your answer", "Your answer"),
+    "progress": ("In progress", "In progress"),
     "ready": ("Ready to start", "Ready"),
     "others": ("Needs someone else", "Someone else"),
     "blocked": ("Waits on other tickets", "Waiting"),
 }
 DEFAULT_KINDS = {"research": "Research", "grilling": "Decision", "prototype": "Prototype", "task": "Task"}
 DONE_STATUSES = {"resolved", "closed", "done"}
+PROGRESS_STATUSES = {"claimed", "in-progress", "in progress"}
 
 DEFAULT_INDEX = {
     "eyebrow": "Wayfinder map",
@@ -93,7 +95,7 @@ def parse_ticket(path):
     lines = text.splitlines()
     check(lines and lines[0].startswith("# "), f"{path.name}: the first line must be '# <title>'")
     header = re.split(r"^## ", text, maxsplit=1, flags=re.M)[0]  # body lines such as "Status:" under ## Answer never count
-    fields = dict(re.findall(r"^(Type|Status|Owner|Inputs from|Blocked by|Labels): *(.*?) *$", header, re.M))
+    fields = dict(re.findall(r"^(Type|Status|Owner|Inputs from|Blocked by|Labels|PR): *(.*?) *$", header, re.M))
     kind = fields.get("Type", "")
     if not kind:
         label = re.search(r"wayfinder:(\w+)", fields.get("Labels", ""))
@@ -108,6 +110,7 @@ def parse_ticket(path):
         "status": fields.get("Status", "open").strip().lower(),
         "owner": fields.get("Owner", ""),
         "inputs": fields.get("Inputs from", ""),
+        "pr": fields.get("PR", ""),
         "blocked": blocked,
     }
 
@@ -128,10 +131,14 @@ def load_tickets(project, C):
         for b in t["blocked"]:
             check(b in every, f"#{t['n']} is blocked by #{b}, which has no ticket file")
             check(b not in skip, f"#{t['n']} is blocked by #{b}, which is in SKIP. Drop the edge or the skip.")
-    you, others = set(getattr(C, "WAITING_ON_YOU", set())), set(getattr(C, "NEEDS_OTHERS", set()))
-    check(you <= set(tickets), f"WAITING_ON_YOU names unknown tickets {sorted(you - set(tickets))}")
-    check(others <= set(tickets), f"NEEDS_OTHERS names unknown tickets {sorted(others - set(tickets))}")
-    check(not you & others, f"tickets in both WAITING_ON_YOU and NEEDS_OTHERS: {sorted(you & others)}")
+    sets = {name: set(getattr(C, name, set())) for name in ("WAITING_ON_YOU", "IN_PROGRESS", "NEEDS_OTHERS")}
+    for name, ns in sets.items():
+        check(ns <= set(tickets), f"{name} names unknown tickets {sorted(ns - set(tickets))}")
+    names = list(sets)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            check(not sets[a] & sets[b], f"tickets in both {a} and {b}: {sorted(sets[a] & sets[b])}")
+    you, progress, others = sets["WAITING_ON_YOU"], sets["IN_PROGRESS"], sets["NEEDS_OTHERS"]
 
     for t in tickets.values():
         t["blocks"] = sorted(n for n, o in tickets.items() if t["n"] in o["blocked"])
@@ -140,6 +147,8 @@ def load_tickets(project, C):
             t["s"] = "decided"
         elif t["n"] in you:
             t["s"] = "you"
+        elif t["n"] in progress or t["status"] in PROGRESS_STATUSES:
+            t["s"] = "progress"
         elif t["n"] in others:
             t["s"] = "others"
         else:
@@ -383,6 +392,10 @@ class Site:
         )
         lane = next(label for key, label, ns in self.lanes if n in ns)
         meta = [f"Owner: {html.escape(t['owner'])}" if t["owner"] else "", f"Input from: {html.escape(t['inputs'])}" if t["inputs"] and t["inputs"].lower() != "none" else ""]
+        if t["pr"]:
+            pr = html.escape(t["pr"])
+            is_url = re.fullmatch(r"https?://\S+", t["pr"])
+            meta.append(f'PR: <a href="{pr}" target=_blank rel=noopener>{pr}</a>' if is_url else f"PR: {pr}")
         meta.append(f"Source: <code>issues/{html.escape(t['file'])}</code>")
         body = f"""
 <main class=narrow>

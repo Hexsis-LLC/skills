@@ -1,7 +1,8 @@
 """Words for the example wayfinder pane. Every value here is made up.
 
 Inline syntax in any text: `code`, **bold**, [label](https://...), and #NN for a link to a ticket page.
-States come from issues/*.md; WAITING_ON_YOU and NEEDS_OTHERS refine the open tickets.
+States come from issues/*.md; WAITING_ON_YOU, IN_PROGRESS and NEEDS_OTHERS refine the open tickets.
+A Status: claimed (or in-progress) ticket shows as In progress without being listed in IN_PROGRESS.
 """
 
 PANE = ""  # this Pane's Latest Link, saved after the first publish; the builder ignores it
@@ -19,6 +20,7 @@ INDEX = dict(
 # A step drops out when a {state} it names has no tickets. Link sibling Panes by their Latest Link.
 NEXT_STEPS = [
     "Answer the open questions on {you}. Open a card, then leave a thread on any point.",
+    "Already underway: {progress}. Nothing to do until it lands.",
     "Wait for an answer from other people on {others}.",
     "When you say go, I start: {ready}.",
     "Then open the [home page prototypes](https://example.com/prototypes) and pick a variant.",
@@ -26,11 +28,12 @@ NEXT_STEPS = [
 
 WAITING_ON_YOU = {"03"}
 NEEDS_OTHERS = {"04"}
+IN_PROGRESS = set()  # for trackers that write no status; #08 is in progress from its Status: claimed line
 
 # (key, label, tickets). The list order sets how cards stack inside one column.
 LANES = [
     ("content", "Content and owners", ["01", "03", "05", "07"]),
-    ("platform", "Tool and access", ["02", "04", "06"]),
+    ("platform", "Tool and access", ["02", "04", "08", "06"]),
 ]
 
 PANELS = [
@@ -116,6 +119,17 @@ T["06"] = dict(
         "Tool B lets us pin sections and add a search box at the top.",
         "Variant A leads with search. Variant B leads with a list of teams.",
     ],
+)
+
+T["08"] = dict(
+    short="Import test",
+    one="Import 50 sample pages into Tool B and check what survives.",
+    why="Tool B was chosen on the promise of a good import (#02). If the test fails, Tool A becomes the pick.",
+    know=[
+        "IT started the test this week. The import script is in review.",
+        "The sample covers pages with history, internal links and attachments.",
+    ],
+    open=["Do comments on old pages need to move, or only the page text?"],
 )
 
 T["07"] = dict(
