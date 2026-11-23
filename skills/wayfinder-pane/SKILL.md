@@ -33,10 +33,11 @@ To start a new pane, copy [`example/issues/`](example/issues) and [`example/pane
 # <full title>
 
 Type: research | grilling | prototype | task | <any word>
-Status: open | claimed | resolved
+Status: open | claimed | in-progress | resolved
 Owner: <name or role>
 Inputs from: <names, or none>
 Blocked by: 01, 04
+PR: <https://... link, optional>
 
 ## Question
 ...
@@ -45,16 +46,18 @@ Blocked by: 01, 04
 - The number is the file name's leading digits: `07-plan-the-move.md` is `#07`.
 - `Blocked by: none` marks a ticket with no blockers.
 - The builder reads only the title line and the header fields above the first `## ` heading. The body stays the tracker's record. The pane shows the words from `pane_content.py`.
-- `Status: resolved`, `closed` or `done` counts as finished. Any other status is open.
+- `Status: resolved`, `closed` or `done` counts as finished. `claimed`, `in-progress` or `in progress` counts as started. Any other status is open.
+- An optional `PR:` line shows in the ticket page's footer, next to the owner. A `http(s)://` value becomes a link.
 - With no `Type:` line, a `Labels: wayfinder:<type>` line supplies the type.
 
 ### From /wayfinder
 
 - **Local tracker:** pass `.scratch/<effort>/` as the project. Its `issues/` match once each file starts with a `# <title>` line, which the builder requires.
-- **GitHub or another tracker:** export each ticket to `<project>/issues/<number>-<slug>.md` with the title and the header fields. Map closed to `Status: resolved`, an assignee to `claimed`, native blocking to `Blocked by`, and `wayfinder:<type>` to `Type`. Export again before each rebuild.
+- **GitHub or another tracker:** export each ticket to `<project>/issues/<number>-<slug>.md` with the title and the header fields. Map closed to `Status: resolved`, an assignee or open pull request to `claimed`, a linked pull request to `PR:`, native blocking to `Blocked by`, and `wayfinder:<type>` to `Type`. Export again before each rebuild.
 - **Map body:** Destination becomes the first `PANELS` entry. Not yet specified and Out of scope each become an `items` panel. Decisions so far are the Decided cards, so don't restate them.
 - **Out-of-scope tickets** are closed but off the route: list them in `SKIP`.
-- **Waiting tickets:** a HITL ticket waiting on the person goes in `WAITING_ON_YOU`. One waiting on anyone else goes in `NEEDS_OTHERS`.
+- **Claimed tickets:** `/wayfinder`'s `claimed` shows as **In progress**. A tracker that writes no status can list started tickets in `IN_PROGRESS` instead.
+- **Waiting tickets:** a HITL ticket waiting on the person goes in `WAITING_ON_YOU`, even when it is claimed. One waiting on anyone else goes in `NEEDS_OTHERS`.
 - **Refer by name:** a ticket's `short` is its card name. Keep it to two to four words.
 
 ## Content Module (`pane_content.py`)
@@ -64,11 +67,11 @@ Blocked by: 01, 04
 | `INDEX` | yes | dict: `title` (required), and optionally `eyebrow`, `page_title`, `lede`, `next_heading`, `map_heading`, `hint_wide`, `hint_narrow` |
 | `LANES` | yes | list of `(key, label, [ticket numbers])`. The key is lower-case letters, digits and hyphens. The list order sets how cards stack within a column. |
 | `T` | yes | dict of ticket number → dict. `short` (card name) and `one` (one-sentence summary) are required. `why`, the section keys and `related` are optional. |
-| `NEXT_STEPS` | no | list of sentences. `{you}`, `{ready}`, `{others}`, `{blocked}` and `{decided}` expand to that state's tickets by number and name. A step whose placeholder is empty drops out. |
-| `WAITING_ON_YOU`, `NEEDS_OTHERS` | no | sets of open ticket numbers |
+| `NEXT_STEPS` | no | list of sentences. `{you}`, `{progress}`, `{ready}`, `{others}`, `{blocked}` and `{decided}` expand to that state's tickets by number and name. A step whose placeholder is empty drops out. |
+| `WAITING_ON_YOU`, `IN_PROGRESS`, `NEEDS_OTHERS` | no | sets of open ticket numbers. A ticket sits in at most one. `IN_PROGRESS` is for trackers that write no `claimed` status. |
 | `SKIP` | no | set of ticket numbers left off the pane |
 | `PANELS` | no | list of dicts shown under the map: `heading` plus one of `text` (string), `items` (list) or `terms` (list of `(term, definition)`) |
-| `STATES` | no | override the state labels: `{"decided": ("Done", "Done")}` as `(full label, card label)` |
+| `STATES` | no | override the state labels: `{"decided": ("Done", "Done")}` as `(full label, card label)`. The keys are `decided`, `you`, `progress`, `ready`, `others` and `blocked`. |
 | `KINDS` | no | override or add type labels: `{"grilling": "Decision"}` |
 | `SECTIONS` | no | replace the ticket-page sections: `(key, heading, kind)`. The kind is `callout`, `text`, `list` (bullets) or `steps` (numbered). |
 
@@ -78,7 +81,8 @@ All text takes `code`, `**bold**`, `[label](https://...)` and `#NN`, which links
 
 ## How the Map Is Derived
 
-- **State**, first match wins: finished status → **decided**; in `WAITING_ON_YOU` → **you** (pulsing ring); in `NEEDS_OTHERS` → **others**; every blocker finished → **ready**; otherwise → **blocked** (dashed card).
+- **State**, first match wins: finished status → **decided**; in `WAITING_ON_YOU` → **you** (pulsing ring); started status or in `IN_PROGRESS` → **progress**, shown as "In progress" (half-filled dot and a slow glide along the card's foot); in `NEEDS_OTHERS` → **others**; every blocker finished → **ready**; otherwise → **blocked** (dashed card).
+- The state order on the stats, legend and `STATES` is decided, you, progress, ready, others, blocked.
 - **Depth** is the card's column: 0 for a ticket with no blockers, otherwise 1 + the deepest blocker. It also staggers the entrance and the edge draw-in.
 - **Lane** is the card's row group, from `LANES`. An edge between lanes is dashed.
 - **Unlocks** are the tickets that list this one in `Blocked by`. Ticket pages show "Needs first" and "Unlocks". Previous and next follow lane order, then depth, then number.
@@ -96,6 +100,7 @@ The build stops with a message, and writes nothing, when:
 - a blocker has no ticket file or is in `SKIP`;
 - the blocking lines form a cycle;
 - a content key is unknown, which usually means a typo;
+- a ticket is in more than one of `WAITING_ON_YOU`, `IN_PROGRESS` and `NEEDS_OTHERS`;
 - `--out` holds files it didn't write.
 
 On success it prints the file count. That count is the `expectedFiles` for a Glass Page upload. The output is `index.html`, `t/<NN>.html` and `assets/`.
@@ -107,7 +112,7 @@ Check the result in a browser: the wide map with its edges and chain highlight, 
 [`assets/site.css`](assets/site.css) and [`assets/map.js`](assets/map.js) are shared by every pane. They hold:
 
 - the light and dark tokens and the per-state colours;
-- the rise entrance, the pulse and the count-up stats;
+- the rise entrance, the pulse, the in-progress glide and the count-up stats;
 - the Bézier edges and the draw-in;
 - the chain focus, card lift and double focus ring;
 - the view transitions from a card to its ticket header;

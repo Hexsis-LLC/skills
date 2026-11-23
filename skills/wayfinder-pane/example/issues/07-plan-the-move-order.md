@@ -4,7 +4,7 @@ Type: task
 Status: open
 Owner: Project lead
 Inputs from: IT
-Blocked by: 04, 05, 06
+Blocked by: 04, 05, 06, 08
 
 ## Question
 
